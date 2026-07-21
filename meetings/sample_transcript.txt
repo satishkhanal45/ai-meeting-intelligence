@@ -1,0 +1,77 @@
+Sprint Planning — Week 42
+Date: 2026-07-20
+
+Participants: Alice Chen, Bob Martinez, Priya Sharma, Sam Wilson, Diana Lee
+
+Alice: Good morning everyone. Let's start the sprint planning for week 42. First, let's review what we accomplished last sprint.
+
+Bob: I managed to complete the authentication refactor. The new JWT implementation is deployed to staging. We should schedule a security review before moving to production.
+
+Priya: Great work Bob. I'll set up the security review for Thursday this week. Also, I finished the database migration scripts. They're ready for review.
+
+Sam: I'll review those migration scripts today, Priya. On my end, I implemented the rate limiting middleware. It's currently blocking at 100 requests per minute per user. We might need to adjust that threshold.
+
+Alice: Let's keep the 100 RPM for now and monitor. Sam, can you add a metric to track how often users hit the limit?
+
+Sam: Sure, I can add that. I'll also need to update the API documentation to reflect the rate limits.
+
+Diana: Speaking of documentation, I've drafted the onboarding guide for new developers. It covers the local setup, architecture overview, and deployment process. I'll share the link in Slack.
+
+Alice: Excellent. Now let's talk about the priority items for this sprint.
+
+Priya: The payment integration is critical. Our current provider's contract expires in 45 days. We need to have the Stripe migration complete by September 1st.
+
+Alice: That's a hard deadline. Priya, you'll own the Stripe migration. What's your timeline?
+
+Priya: I estimate two weeks for the core integration, then one week for testing. I'll need frontend support for the checkout UI.
+
+Diana: I can handle the frontend checkout components. I'll start on those next week.
+
+Alice: Great. What about the notification system upgrade?
+
+Bob: That's my primary focus this sprint. I'm migrating from email-only to multi-channel — email, Slack, and in-app. The Slack integration is the most complex part. I estimate about three weeks total.
+
+Alice: Can we break that into smaller deliverables? I'd like to see the email channel upgraded first, then Slack, then in-app.
+
+Bob: Makes sense. I'll deliver the email upgrades by the end of this week.
+
+Sam: I have a concern about the notification system performance. If we're sending webhook notifications to Slack, we need to handle rate limits and retries. I can help design the retry mechanism.
+
+Bob: That would be great, Sam. Let's pair on that tomorrow.
+
+Alice: Any other blockers or dependencies?
+
+Priya: I need API access to the production Stripe account. Can someone help with that?
+
+Alice: I'll open a ticket with DevOps for that. Also, we need to decide who's on call for production incidents this sprint.
+
+Sam: I can take the first week. Bob, can you take the second?
+
+Bob: Works for me.
+
+Alice: Decision made. Sam on call week 1, Bob week 2. Let me capture the action items.
+
+Action Items:
+1. Bob — Security review for JWT auth by Thursday (medium priority)
+2. Priya — Schedule security review for Thursday (high priority)
+3. Sam — Review migration scripts by EOD today (high priority)
+4. Sam — Add rate limit tracking metric (medium priority)
+5. Sam — Update API docs for rate limits (low priority)
+6. Priya — Stripe migration — deadline September 1st (critical priority)
+7. Diana — Frontend checkout components — start next week (high priority)
+8. Bob — Email notification upgrade by end of week (high priority)
+9. Bob & Sam — Pair on notification retry mechanism tomorrow (medium priority)
+10. Alice — Open DevOps ticket for Stripe API access (high priority)
+
+Key Decisions:
+- Rate limit stays at 100 RPM for now
+- Notification system delivered in phases: email → Slack → in-app
+- Sam on call week 1, Bob on call week 2
+- Stripe migration is the top priority for this sprint
+
+Deadlines:
+- Security review: Thursday 2026-07-24
+- Migration scripts review: today 2026-07-20
+- Email notification upgrade: end of week 2026-07-25
+- Stripe migration: September 1st 2026-09-01
+- Contract expiry: 45 days from today
