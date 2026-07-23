@@ -186,6 +186,18 @@ def build_agraph_config() -> Any:
         highlight_color="#2ECC71",
         collapsible=True,
         **{
+            "edges": {
+                "font": {
+                    "size": 12,
+                    "color": "#cccccc",
+                    "align": "middle",
+                    "strokeWidth": 2,
+                    "strokeColor": "#0f1117",
+                },
+                "smooth": {
+                    "type": "continuous",
+                },
+            },
             "interaction": {
                 "hover": True,
                 "tooltipDelay": 100,
