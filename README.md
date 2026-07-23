@@ -23,11 +23,11 @@ The original Streamlit frontend has been migrated to a **React SPA** powered by 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     React SPA (Vite + TS)                    │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐       │
-│  │Dashboard │ │New       │ │History   │ │Settings  │       │
-│  │          │ │Meeting   │ │          │ │          │       │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘       │
+│                     React SPA (Vite + TS)                   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
+│  │Dashboard │ │New       │ │History   │ │Settings  │        │
+│  │          │ │Meeting   │ │          │ │          │        │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘        │
 │         │            │            │            │            │
 │         └────────────┴────────────┴────────────┘            │
 │                          │                                  │
@@ -36,8 +36,8 @@ The original Streamlit frontend has been migrated to a **React SPA** powered by 
                             │
 ┌───────────────────────────┼─────────────────────────────────┐
 │                    ┌──────┴──────┐                          │
-│                    │  FastAPI     │                          │
-│                    │  api/main.py │                          │
+│                    │  FastAPI     │                         │
+│                    │  api/main.py │                         │
 │                    └──────┬──────┘                          │
 │                    ┌──────┴──────┐                          │
 │                    │  pipeline   │                          │
@@ -45,18 +45,18 @@ The original Streamlit frontend has been migrated to a **React SPA** powered by 
 │                    └──────┬──────┘                          │
 │          ┌────────────────┼────────────────┐                │
 │          ▼                ▼                ▼                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │  prompts.py │  │  graph.py   │  │  models.py  │        │
-│  └─────────────┘  └─────────────┘  └─────────────┘        │
-│          │                                                 │
-│          ▼                                                 │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              Provider Abstraction                   │    │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐ │    │
-│  │  │  Gemini   │  │   Groq   │  │   OpenRouter     │ │    │
-│  │  │ Provider  │  │ Provider  │  │   Provider       │ │    │
-│  │  └──────────┘  └──────────┘  └──────────────────┘ │    │
-│  └────────────────────────────────────────────────────┘    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │  prompts.py │  │  graph.py   │  │  models.py  │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+│          │                                                  │
+│          ▼                                                  │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │              Provider Abstraction                  │     │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │     │
+│  │  │  Gemini   │  │   Groq   │  │   OpenRouter    │  │     │
+│  │  │ Provider  │  │ Provider  │  │   Provider     │  │     │
+│  │  └──────────┘  └──────────┘  └──────────────────┘  │     │
+│  └────────────────────────────────────────────────────┘     │
 │                            │                                │
 │                            ▼                                │
 │                    ┌──────────────┐                         │
@@ -131,11 +131,11 @@ cp .env.example .env
 
 ## API Key Setup
 
-| Provider   | Env Variable         | Get Key At                                 |
+| Provider   | Env Variable        | Get Key At                                 |
 |------------|---------------------|--------------------------------------------|
 | Gemini     | `GEMINI_API_KEY`    | https://aistudio.google.com/app/apikey     |
 | Groq       | `GROQ_API_KEY`      | https://console.groq.com/keys              |
-| OpenRouter | `OPENROUTER_API_KEY` | https://openrouter.ai/keys                |
+| OpenRouter | `OPENROUTER_API_KEY`| https://openrouter.ai/keys                 |
 
 At least one API key is required. The application will detect which providers are configured and make them available.
 
@@ -174,7 +174,7 @@ uv run streamlit run app.py
 
 All configuration is managed via `.env` file:
 
-| Variable                | Default  | Description                  |
+| Variable               | Default  | Description                  |
 |------------------------|----------|------------------------------|
 | `DEFAULT_PROVIDER`     | groq     | Default LLM provider         |
 | `DEFAULT_TEMPERATURE`  | 0.3      | LLM temperature              |
@@ -331,9 +331,9 @@ The knowledge graph is generated by the LLM from the meeting summary and extract
 
 ### Entity Types & Visual Appearance
 
-| Type        | Color   | Icon  | Description                    |
-|-------------|---------|-------|--------------------------------|
-| Person      | `#4A90D9` Blue | 👤 | Participants and individuals   |
+| Type        | Color   | Icon  | Description                         |
+|-------------|---------|-------|-------------------------------------|
+| Person      | `#4A90D9` Blue  | 👤 | Participants and individuals   |
 | Task        | `#27AE60` Green | 📋 | Action items                   |
 | Deadline    | `#F1C40F` Yellow| 📅 | Time-bound deliverables        |
 | Decision    | `#8E44AD` Purple| 🎯 | Strategic choices              |
@@ -345,9 +345,9 @@ Each node renders as a **sprite text pill** (icon + bold label) with a colored b
 
 ### Relationship Types & Arrow Colors
 
-| Label           | Arrow Color  | Meaning                                    |
-|-----------------|--------------|--------------------------------------------|
-| `assigned_to`   | `#6C63FF` Purple | Person assigned to a task              |
+| Label           | Arrow Color      | Meaning                               |
+|-----------------|------------------|---------------------------------------|
+| `assigned_to`   | `#6C63FF` Purple | Person assigned to a task             |
 | `depends_on`    | `#E74C3C` Red    | Entity depends on another             |
 | `related_to`    | `#4ECDC4` Teal   | General relation between entities     |
 | `mentioned_in`  | `#FFA07A` Orange | Entity mentioned in a context         |
@@ -450,18 +450,18 @@ A realistic sprint planning transcript is included at `meetings/sample_transcrip
 - **Pagination** — Paginated meeting history for large archives
 ## Troubleshooting
 
-| Problem                          | Solution                                           |
-|----------------------------------|----------------------------------------------------|
-| No API key configured            | Add at least one key to `.env`                     |
-| Provider returns empty response  | Check API key validity and quota                   |
-| Database locked error            | Ensure only one instance is running                 |
-| Large transcript fails           | Reduce chunk size in frontend settings             |
-| 3D graph not displaying          | Ensure browser supports WebGL; check console for errors |
-| Invalid JSON from LLM            | Retry with lower temperature (0.1–0.3)             |
-| File upload fails                | Ensure file is UTF-8 encoded; try `.txt` format    |
+| Problem                          | Solution                                                      |
+|----------------------------------|---------------------------------------------------------------|
+| No API key configured            | Add at least one key to `.env`                                |
+| Provider returns empty response  | Check API key validity and quota                              |
+| Database locked error            | Ensure only one instance is running                           |
+| Large transcript fails           | Reduce chunk size in frontend settings                        |
+| 3D graph not displaying          | Ensure browser supports WebGL; check console for errors       |
+| Invalid JSON from LLM            | Retry with lower temperature (0.1–0.3)                        |
+| File upload fails                | Ensure file is UTF-8 encoded; try `.txt` format               |
 | `uv` command not found           | Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh` |
-| Frontend shows API errors        | Ensure backend is running on port 8080              |
-| Port already in use              | Kill existing process: `kill $(lsof -t -i :PORT)`  |
+| Frontend shows API errors        | Ensure backend is running on port 8080                        |
+| Port already in use              | Kill existing process: `kill $(lsof -t -i :PORT)`             |
 
 ## License
 
