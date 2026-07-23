@@ -432,6 +432,7 @@ A realistic sprint planning transcript is included at `meetings/sample_transcrip
 - **Email Integration** — Send action item summaries to participants
 - **Batch Processing** — Bulk process multiple transcripts
 - **Pagination** — Paginated meeting history for large archives
+
 ## Troubleshooting
 
 | Problem                          | Solution                                                      |
@@ -447,6 +448,3 @@ A realistic sprint planning transcript is included at `meetings/sample_transcrip
 | Frontend shows API errors        | Ensure backend is running on port 8080                        |
 | Port already in use              | Kill existing process: `kill $(lsof -t -i :PORT)`             |
 
-## License
-
-MIT
