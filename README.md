@@ -420,22 +420,6 @@ A realistic sprint planning transcript is included at `meetings/sample_transcrip
 4. Upload `meetings/sample_transcript.txt` or paste its contents
 5. Click **Process Meeting**
 
-## Screenshots
-
-<!-- Add screenshots here after running the application:
-
-![Dashboard](./assets/dashboard.png)
-*Dashboard with summary metrics*
-
-![New Meeting](./assets/new_meeting.png)
-*Processing a new meeting with results tabs*
-
-![Knowledge Graph](./assets/knowledge_graph.png)
-*Interactive knowledge graph visualization*
-
-![Meeting History](./assets/meeting_history.png)
-*Search and browse past meetings*
--->
 
 ## Future Improvements
 
