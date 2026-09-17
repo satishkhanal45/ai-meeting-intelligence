@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# A transcript far larger than this is almost certainly a mistake, and the whole
+# body is held in memory before processing starts.
+MAX_TRANSCRIPT_CHARS = 2_000_000
 
 
 class ProcessRequest(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=MAX_TRANSCRIPT_CHARS)
     provider_name: str = ""
-    temperature: float = 0.3
-    chunk_size: int | None = None
-    chunk_overlap: int | None = None
-    chunk_mode: str = "token"
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    chunk_size: int | None = Field(default=None, ge=100, le=100_000)
+    chunk_overlap: int | None = Field(default=None, ge=0)
+    chunk_mode: str = Field(default="token", pattern="^(token|speaker)$")
 
 
 class StatsResponse(BaseModel):
@@ -27,5 +31,12 @@ class ConfigResponse(BaseModel):
     configured_providers: list[str]
 
 
+class HealthResponse(BaseModel):
+    status: str
+    database: bool
+    configured_providers: list[str]
+
+
 class ErrorResponse(BaseModel):
     detail: str
+    error_id: str | None = None

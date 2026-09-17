@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import traceback
+import uuid
 
 from fastapi import APIRouter, HTTPException
 
-from api.schemas import ConfigResponse, ErrorResponse, ProcessRequest, StatsResponse
+from api.schemas import (
+    ConfigResponse,
+    HealthResponse,
+    ProcessRequest,
+    StatsResponse,
+)
 from config import settings
 from database import (
     delete_meeting,
@@ -13,7 +19,6 @@ from database import (
     get_full_meeting,
     get_meeting_count,
     get_meeting_list,
-    init_db,
     search_meetings,
 )
 from logger import get_logger
@@ -28,9 +33,25 @@ register_provider("gemini", GeminiProvider)
 register_provider("groq", GroqProvider)
 register_provider("openrouter", OpenRouterProvider)
 
-init_db()
-
 router = APIRouter(prefix="/api")
+
+
+@router.get("/health", response_model=HealthResponse)
+def health():
+    """Liveness plus readiness: is the database reachable and a provider usable?"""
+    db_ok = True
+    try:
+        get_meeting_count()
+    except Exception as exc:
+        db_ok = False
+        logger.error("Health check: database unreachable", extra={"error": str(exc)})
+
+    configured = settings.get_configured_providers()
+    return HealthResponse(
+        status="ok" if (db_ok and configured) else "degraded",
+        database=db_ok,
+        configured_providers=configured,
+    )
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -77,8 +98,15 @@ def get_meeting_graph(meeting_id: str):
     try:
         graph_data = json.loads(meeting.graph_data.graph_json)
     except (json.JSONDecodeError, ValueError):
-        graph_data = {"entities": [], "relationships": []}
-    return graph_data
+        graph_data = {}
+    # A model can return valid JSON in the wrong shape; the client relies on
+    # both keys always being present.
+    if not isinstance(graph_data, dict):
+        graph_data = {}
+    return {
+        "entities": graph_data.get("entities") or [],
+        "relationships": graph_data.get("relationships") or [],
+    }
 
 
 @router.post("/process")
@@ -96,13 +124,26 @@ def process(req: ProcessRequest):
         )
         return meeting
     except ValueError as exc:
+        # Caller-supplied problems (unknown provider, missing API key) are safe
+        # to echo back; they contain no internal detail.
         raise HTTPException(status_code=400, detail=str(exc))
     except RuntimeError as exc:
-        logger.error("Processing failed", extra={"error": str(exc)})
-        raise HTTPException(status_code=500, detail=str(exc))
+        error_id = uuid.uuid4().hex[:12]
+        logger.error("Processing failed", extra={"error_id": error_id, "error": str(exc)})
+        raise HTTPException(
+            status_code=502,
+            detail=f"The language model provider failed to respond. Error id: {error_id}",
+        )
     except Exception as exc:
-        logger.error("Processing failed (unexpected)", extra={"error": str(exc), "traceback": traceback.format_exc()})
-        raise HTTPException(status_code=500, detail=str(exc))
+        error_id = uuid.uuid4().hex[:12]
+        logger.error(
+            "Processing failed (unexpected)",
+            extra={"error_id": error_id, "error": str(exc), "traceback": traceback.format_exc()},
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Processing failed. Error id: {error_id}",
+        )
 
 
 @router.get("/config", response_model=ConfigResponse)

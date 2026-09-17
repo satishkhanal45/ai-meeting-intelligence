@@ -4,13 +4,14 @@ Loads environment variables, validates API keys, and provides typed
 configuration objects used throughout the application.
 """
 
-import os
 from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+_QUOTE_CHARS = "\"'"
 
 load_dotenv()
 
@@ -32,11 +33,48 @@ class Settings(BaseSettings):
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
 
     default_provider: ProviderName = Field(default="gemini", alias="DEFAULT_PROVIDER")
-    default_temperature: float = Field(default=0.3, alias="DEFAULT_TEMPERATURE")
-    default_chunk_size: int = Field(default=1000, alias="DEFAULT_CHUNK_SIZE")
-    default_chunk_overlap: int = Field(default=200, alias="DEFAULT_CHUNK_OVERLAP")
+    default_temperature: float = Field(default=0.3, ge=0.0, le=2.0, alias="DEFAULT_TEMPERATURE")
+    default_chunk_size: int = Field(default=1000, ge=100, le=100_000, alias="DEFAULT_CHUNK_SIZE")
+    default_chunk_overlap: int = Field(default=200, ge=0, alias="DEFAULT_CHUNK_OVERLAP")
+
+    # Comma-separated browser origins allowed to call the API. A wildcard is not
+    # valid alongside credentialed requests, so the default names the dev server.
+    allowed_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173",
+        alias="ALLOWED_ORIGINS",
+    )
 
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip_surrounding_quotes(cls, value):
+        """Tolerate quoted values in ``.env``.
+
+        ``python-dotenv`` strips surrounding quotes, but Docker's ``--env-file``
+        and compose's ``env_file:`` pass them through verbatim. Without this,
+        ``DEFAULT_PROVIDER="groq"`` arrives as the 5-character string
+        ``"groq"`` and fails validation inside a container.
+        """
+        if isinstance(value, str) and len(value) >= 2:
+            if value[0] == value[-1] and value[0] in _QUOTE_CHARS:
+                return value[1:-1]
+        return value
+
+    @field_validator("default_chunk_overlap")
+    @classmethod
+    def _overlap_below_chunk_size(cls, value: int, info) -> int:
+        chunk_size = info.data.get("default_chunk_size")
+        if chunk_size is not None and value >= chunk_size:
+            raise ValueError(
+                f"DEFAULT_CHUNK_OVERLAP ({value}) must be smaller than "
+                f"DEFAULT_CHUNK_SIZE ({chunk_size})"
+            )
+        return value
+
+    def get_allowed_origins(self) -> list[str]:
+        """Return the configured CORS origins as a list."""
+        return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
 
     def is_provider_configured(self, provider: ProviderName) -> bool:
         key_map: dict[ProviderName, str] = {
