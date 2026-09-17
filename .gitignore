@@ -1,3 +1,8 @@
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -35,6 +40,14 @@ data/*.db-shm
 # Logs
 *.log
 logs/
+data/logs/
+
+# Test & tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Output
 meetings/*.json
