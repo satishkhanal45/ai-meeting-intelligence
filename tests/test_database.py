@@ -12,17 +12,16 @@ from contextlib import contextmanager
 import pytest
 
 from database import (
-    get_connection,
-    get_transaction,
+    SEARCHABLE_COLUMNS,
+    delete_meeting,
+    get_all_participants,
+    get_full_meeting,
+    get_meeting_count,
+    get_meeting_list,
+    get_meeting_metadata,
     init_db,
     insert_meeting,
-    get_meeting_metadata,
-    get_meeting_list,
-    get_full_meeting,
-    delete_meeting,
     search_meetings,
-    get_meeting_count,
-    get_all_participants,
 )
 from models import (
     ActionItem,
@@ -36,23 +35,35 @@ from models import (
 
 
 @pytest.fixture(autouse=True)
-def _in_memory_db(monkeypatch):
-    """Override DB_PATH to use an in-memory database for tests."""
-    monkeypatch.setattr("database.DB_PATH", ":memory:")
-    monkeypatch.setattr("config.DB_PATH", ":memory:")
+def _temp_db(monkeypatch, tmp_path):
+    """Point the database layer at a throwaway file for the duration of a test.
+
+    ``:memory:`` cannot be used here: the module opens a new connection per
+    call, and every ``sqlite3.connect(":memory:")`` returns a *different* empty
+    database, so nothing written by one call is visible to the next. A file in
+    ``tmp_path`` gives real isolation without touching ``data/meetings.db``.
+    """
+    db_file = tmp_path / "test_meetings.db"
+    monkeypatch.setattr("database.DB_PATH", str(db_file))
     init_db()
+    yield db_file
 
 
-@contextmanager
-def _override_connection():
-    """Helper to yield a connection to the in-memory DB."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-    finally:
-        conn.close()
+@pytest.fixture
+def _override_connection(_temp_db):
+    """Yield a factory for raw connections to the test database."""
+
+    @contextmanager
+    def _connect():
+        conn = sqlite3.connect(str(_temp_db))
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    return _connect
 
 
 def _create_test_meeting(overrides: dict = None) -> Meeting:
@@ -76,7 +87,7 @@ def _create_test_meeting(overrides: dict = None) -> Meeting:
 
 
 class TestInitDB:
-    def test_tables_created(self):
+    def test_tables_created(self, _override_connection):
         with _override_connection() as conn:
             tables = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -184,3 +195,61 @@ class TestCountAndParticipants:
         participants = get_all_participants()
         assert "Alice" in participants
         assert "Bob" in participants
+
+
+class TestSearchRegressions:
+    """Regressions for the search layer.
+
+    ``search_meetings`` used to interpolate a table alias that was never
+    declared in the FROM clause, so every non-empty query raised
+    ``sqlite3.OperationalError`` and the endpoint returned HTTP 500.
+    """
+
+    @pytest.mark.parametrize(
+        "query",
+        ["Sprint Planning", "Alice", "Fix bug", "Use Stripe", "EOW"],
+    )
+    def test_every_searchable_column_matches(self, query):
+        insert_meeting(_create_test_meeting())
+        results = search_meetings(query)
+        assert [m.id for m in results] == ["test-001"]
+
+    def test_search_does_not_raise_on_child_tables(self):
+        insert_meeting(_create_test_meeting())
+        # Exercises each configured (table, column) pair, including the child
+        # tables that previously produced "no such column: ai.task".
+        for _table, _column in SEARCHABLE_COLUMNS:
+            assert isinstance(search_meetings("anything"), list)
+
+
+class TestReinsertIsIdempotent:
+    """Saving the same meeting twice must not duplicate its child rows."""
+
+    def test_children_are_not_duplicated(self):
+        meeting = _create_test_meeting()
+        insert_meeting(meeting)
+        insert_meeting(meeting)
+
+        stored = get_full_meeting("test-001")
+        assert len(stored.action_items) == 1
+        assert len(stored.deadlines) == 1
+        assert len(stored.decisions) == 1
+
+    def test_counts_in_list_view_stay_correct(self):
+        meeting = _create_test_meeting()
+        insert_meeting(meeting)
+        insert_meeting(meeting)
+
+        item = next(m for m in get_meeting_list() if m.id == "test-001")
+        assert item.action_item_count == 1
+        assert item.decision_count == 1
+
+    def test_reinsert_updates_child_content(self):
+        insert_meeting(_create_test_meeting())
+        updated = _create_test_meeting(
+            {"action_items": [ActionItem(owner="Bob", task="Ship release", priority="low")]}
+        )
+        insert_meeting(updated)
+
+        stored = get_full_meeting("test-001")
+        assert [i.task for i in stored.action_items] == ["Ship release"]

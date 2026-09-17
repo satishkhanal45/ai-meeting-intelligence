@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
 import pytest
 
 from models import (
@@ -10,18 +12,19 @@ from models import (
     Deadline,
     Decision,
     GraphData,
-    GraphEntity,
-    GraphRelationship,
     Meeting,
     Summary,
     Transcript,
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 @pytest.fixture
 def sample_transcript() -> str:
-    with open("meetings/sample_transcript.txt") as f:
-        return f.read()
+    # Resolve from this file, not the working directory, so the suite passes
+    # regardless of where pytest is invoked from.
+    return (PROJECT_ROOT / "meetings" / "sample_transcript.txt").read_text()
 
 
 @pytest.fixture

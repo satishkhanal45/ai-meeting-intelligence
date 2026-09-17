@@ -6,14 +6,20 @@ Uses a mock provider to avoid actual API calls.
 from __future__ import annotations
 
 import json
-import time
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
+import utils
 from models import ProviderResponse
-from pipeline import PROVIDER_REGISTRY, get_provider, process_transcript, register_provider
+from pipeline import (
+    PROVIDER_REGISTRY,
+    _chunk_cache_key,
+    get_provider,
+    process_transcript,
+    register_provider,
+)
+from utils import cache_chunk_summary, clear_chunk_cache, get_cached_chunk_summary
 
 
 class MockProvider:
@@ -51,6 +57,19 @@ class MockProvider:
             output_tokens=20,
             processing_time=0.01,
         )
+
+
+@pytest.fixture(autouse=True)
+def _temp_db(monkeypatch, tmp_path):
+    """Keep pipeline runs off the developer's real ``data/meetings.db``.
+
+    ``process_transcript`` persists every meeting it builds, so without this the
+    suite writes test fixtures into real application data.
+    """
+    import database
+
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "pipeline_test.db"))
+    database.init_db()
 
 
 @pytest.fixture(autouse=True)
@@ -134,3 +153,72 @@ class TestProviderRegistration:
         provider = get_provider("test_overwrite")
         assert isinstance(provider, MockProvider)
         PROVIDER_REGISTRY.pop("test_overwrite", None)
+
+
+class TestChunkCacheKey:
+    """The cache key must cover everything that can change a chunk summary.
+
+    Keying on the chunk text alone meant that re-processing a transcript with a
+    different provider returned the *previous* provider's summaries, while the
+    meeting was recorded as having been produced by the new one.
+    """
+
+    def setup_method(self):
+        clear_chunk_cache()
+
+    def teardown_method(self):
+        clear_chunk_cache()
+
+    def test_provider_is_part_of_the_key(self):
+        a = _chunk_cache_key("some text", "groq", "llama", 0.3)
+        b = _chunk_cache_key("some text", "gemini", "llama", 0.3)
+        assert a != b
+
+    def test_model_is_part_of_the_key(self):
+        a = _chunk_cache_key("some text", "groq", "llama-3.3", 0.3)
+        b = _chunk_cache_key("some text", "groq", "llama-3.1", 0.3)
+        assert a != b
+
+    def test_temperature_is_part_of_the_key(self):
+        a = _chunk_cache_key("some text", "groq", "llama", 0.3)
+        b = _chunk_cache_key("some text", "groq", "llama", 0.9)
+        assert a != b
+
+    def test_prompt_version_is_part_of_the_key(self):
+        key = _chunk_cache_key("some text", "groq", "llama", 0.3)
+        with patch("pipeline.PROMPT_VERSION", "different-version"):
+            assert _chunk_cache_key("some text", "groq", "llama", 0.3) != key
+
+    def test_identical_context_hits_the_cache(self):
+        args = ("some text", "groq", "llama", 0.3)
+        assert _chunk_cache_key(*args) == _chunk_cache_key(*args)
+
+    def test_switching_provider_does_not_reuse_summaries(self):
+        text = "Alice: We shipped the release.\nBob: Nice work everyone."
+
+        first = MockProvider({"generate": "SUMMARY FROM PROVIDER ONE"})
+        second = MockProvider({"generate": "SUMMARY FROM PROVIDER TWO"})
+        register_provider("prov_one", lambda: first)
+        register_provider("prov_two", lambda: second)
+        try:
+            process_transcript(text, provider_name="prov_one")
+            meeting = process_transcript(text, provider_name="prov_two")
+            # The second run must call the second provider, not replay the first.
+            assert "PROVIDER TWO" in meeting.summary.executive_summary
+        finally:
+            PROVIDER_REGISTRY.pop("prov_one", None)
+            PROVIDER_REGISTRY.pop("prov_two", None)
+
+
+class TestChunkCacheBounds:
+    def test_cache_evicts_oldest_entries(self):
+        clear_chunk_cache()
+        try:
+            for i in range(utils.CHUNK_CACHE_MAX_ENTRIES + 10):
+                cache_chunk_summary(f"key-{i}", f"summary-{i}")
+            assert len(utils._chunk_summary_cache) == utils.CHUNK_CACHE_MAX_ENTRIES
+            assert get_cached_chunk_summary("key-0") is None
+            last = utils.CHUNK_CACHE_MAX_ENTRIES + 9
+            assert get_cached_chunk_summary(f"key-{last}") == f"summary-{last}"
+        finally:
+            clear_chunk_cache()

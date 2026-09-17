@@ -49,12 +49,22 @@ class TestChunkTranscript:
         chunks = chunk_transcript(sample_cleaned_transcript, mode="token", chunk_size=10, overlap=2)
         assert len(chunks) >= 1
 
-    def test_speaker_mode(self):
+    def test_speaker_mode_splits_on_speaker_turns(self):
+        # A turn is only closed once it reaches half the chunk budget, so the
+        # budget has to be small enough for these turns to trigger a split.
+        text = "\n".join(f"{name}: {'word ' * 40}" for name in ["Alice", "Bob", "Alice"])
+        chunks = chunk_transcript(text, mode="speaker", chunk_size=100)
+        assert len(chunks) >= 2
+
+    def test_speaker_mode_merges_short_turns(self):
+        # Small turns are deliberately merged so the pipeline does not spend an
+        # LLM call per one-line utterance.
         text = """Alice: First turn
 Bob: Second turn
 Alice: Third turn"""
         chunks = chunk_transcript(text, mode="speaker", chunk_size=1000)
-        assert len(chunks) >= 2
+        assert len(chunks) == 1
+        assert "First turn" in chunks[0] and "Third turn" in chunks[0]
 
 
 class TestDetectParticipants:
@@ -126,3 +136,41 @@ class TestReadTranscriptFile:
     def test_nonexistent_file(self):
         with pytest.raises((FileNotFoundError, ValueError)):
             read_transcript_file("/nonexistent/file.txt")
+
+
+class TestChunkBudgetRegressions:
+    """Regressions for the chunk-size arithmetic.
+
+    The tokens-per-word ratio used to be inverted, so a request for 1000-token
+    chunks produced chunks of roughly 1560 estimated tokens.
+    """
+
+    @pytest.mark.parametrize("chunk_size", [200, 500, 1000, 2000])
+    def test_chunks_respect_the_requested_budget(self, chunk_size):
+        text = " ".join(["word"] * 8000)
+        chunks = chunk_transcript(text, mode="token", chunk_size=chunk_size, overlap=0)
+        assert chunks
+        # A 10% tolerance covers the estimator's own imprecision; the old bug
+        # overshot by 56%.
+        assert max(estimate_tokens(c) for c in chunks) <= chunk_size * 1.1
+
+    def test_zero_overlap_is_honoured(self):
+        # ``overlap or default`` silently replaced 0 with the configured
+        # default, making non-overlapping chunks impossible to request.
+        text = " ".join(["word"] * 4000)
+        no_overlap = chunk_transcript(text, mode="token", chunk_size=500, overlap=0)
+        overlapping = chunk_transcript(text, mode="token", chunk_size=500, overlap=250)
+        assert len(overlapping) > len(no_overlap)
+
+    def test_zero_overlap_loses_no_words(self):
+        words = [f"w{i}" for i in range(500)]
+        chunks = chunk_transcript(" ".join(words), mode="token", chunk_size=100, overlap=0)
+        assert " ".join(chunks).split() == words
+
+    def test_larger_overlap_produces_more_chunks(self):
+        text = " ".join(["word"] * 4000)
+        counts = [
+            len(chunk_transcript(text, mode="token", chunk_size=500, overlap=ov))
+            for ov in (0, 100, 250, 400)
+        ]
+        assert counts == sorted(counts)
