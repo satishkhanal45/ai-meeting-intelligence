@@ -5,6 +5,16 @@ Imports and registers all available LLM providers so a simple
 """
 
 from providers.base_provider import BaseProvider
+from providers.errors import (
+    ProviderAuthError,
+    ProviderBadRequestError,
+    ProviderConnectionError,
+    ProviderError,
+    ProviderRateLimitError,
+    ProviderResponseError,
+    ProviderServerError,
+    ProviderTimeoutError,
+)
 from providers.gemini_provider import GeminiProvider
 from providers.groq_provider import GroqProvider
 from providers.openrouter_provider import OpenRouterProvider
@@ -14,4 +24,12 @@ __all__ = [
     "GeminiProvider",
     "GroqProvider",
     "OpenRouterProvider",
+    "ProviderError",
+    "ProviderAuthError",
+    "ProviderBadRequestError",
+    "ProviderConnectionError",
+    "ProviderRateLimitError",
+    "ProviderResponseError",
+    "ProviderServerError",
+    "ProviderTimeoutError",
 ]

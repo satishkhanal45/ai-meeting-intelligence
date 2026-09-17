@@ -44,6 +44,23 @@ class Settings(BaseSettings):
         alias="ALLOWED_ORIGINS",
     )
 
+    # ── Provider resilience ──────────────────────────────────────────────
+    request_timeout: float = Field(default=120.0, gt=0, alias="REQUEST_TIMEOUT")
+    connect_timeout: float = Field(default=15.0, gt=0, alias="CONNECT_TIMEOUT")
+    max_retry_attempts: int = Field(default=4, ge=1, le=10, alias="MAX_RETRY_ATTEMPTS")
+    retry_base_delay: float = Field(default=0.5, ge=0, alias="RETRY_BASE_DELAY")
+    retry_max_delay: float = Field(default=30.0, ge=0, alias="RETRY_MAX_DELAY")
+
+    # How many chunk summaries may be in flight at once. Chunks were summarised
+    # serially, making wall-clock time linear in transcript length.
+    max_concurrent_requests: int = Field(
+        default=5, ge=1, le=50, alias="MAX_CONCURRENT_REQUESTS"
+    )
+
+    # Providers tried in order when the requested one fails outright. Empty
+    # disables failover.
+    provider_fallback_chain: str = Field(default="", alias="PROVIDER_FALLBACK_CHAIN")
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("*", mode="before")
@@ -75,6 +92,11 @@ class Settings(BaseSettings):
     def get_allowed_origins(self) -> list[str]:
         """Return the configured CORS origins as a list."""
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
+
+    def get_fallback_chain(self) -> list[str]:
+        """Return configured fallback providers, keeping only configured ones."""
+        names = [p.strip() for p in self.provider_fallback_chain.split(",") if p.strip()]
+        return [n for n in names if n in ("gemini", "groq", "openrouter")]
 
     def is_provider_configured(self, provider: ProviderName) -> bool:
         key_map: dict[ProviderName, str] = {
