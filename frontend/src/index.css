@@ -326,6 +326,17 @@ select {
   padding: 0.5rem 0;
 }
 
+/* Used for a partially-failed run: the result is usable but incomplete, so it
+   needs more emphasis than .info and less alarm than .error. */
+.warning {
+  color: var(--warning);
+  padding: 0.6rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  line-height: 1.5;
+}
+
 .badge {
   display: inline-block;
   padding: 0.15rem 0.5rem;

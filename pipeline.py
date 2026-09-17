@@ -46,7 +46,7 @@ from prompts import (
 from prompts import (
     knowledge_graph as kg_prompts,
 )
-from providers.errors import ProviderError
+from providers.errors import ProviderAuthError, ProviderError
 from utils import (
     cache_chunk_summary,
     chunk_transcript,
@@ -323,8 +323,12 @@ async def _summarise_chunks(
     total = len(chunks)
     done = 0
     lock = asyncio.Lock()
+    # Set when a failure makes every remaining call pointless, such as a
+    # rejected API key. asyncio.gather does not cancel sibling tasks when one
+    # raises, so the tasks have to check this themselves.
+    abort: list[ProviderAuthError] = []
 
-    async def one(index: int, text: str) -> ChunkResult:
+    async def one(index: int, text: str) -> ChunkResult | None:
         nonlocal done
         key = _chunk_cache_key(text, client.name, client.model_name, temperature)
         cached = get_cached_chunk_summary(key)
@@ -333,6 +337,8 @@ async def _summarise_chunks(
         else:
             system, prompt = chunk_summary_prompts(text, index, total)
             async with semaphore:
+                if abort:
+                    return None
                 try:
                     response, served_by = await client.agenerate(prompt, system)
                     # The cache key names the requested provider. A response
@@ -341,6 +347,11 @@ async def _summarise_chunks(
                     if served_by == client.primary_name:
                         cache_chunk_summary(key, response.content)
                     result = ChunkResult(index=index, text=text, summary=response.content)
+                except ProviderAuthError as exc:
+                    # Every remaining call fails identically, so stop the run
+                    # rather than walking the whole transcript to the same end.
+                    abort.append(exc)
+                    return None
                 except ProviderError as exc:
                     logger.error(
                         "Chunk summary failed after retries",
@@ -357,7 +368,13 @@ async def _summarise_chunks(
         return result
 
     results = await asyncio.gather(*(one(i, c) for i, c in enumerate(chunks)))
-    return sorted(results, key=lambda r: r.index)
+    if abort:
+        logger.error(
+            "Aborting run: provider rejected credentials",
+            extra={"error": str(abort[0]), "chunks_attempted": done + 1, "chunks_total": total},
+        )
+        raise abort[0]
+    return sorted((r for r in results if r is not None), key=lambda r: r.index)
 
 
 async def _merge(
@@ -372,6 +389,12 @@ async def _merge(
     if len(summaries) == 1:
         return summaries[0]
 
+    # Count every fold across every round up front. Reporting progress per
+    # round restarts the count each time, which makes the bar jump backwards
+    # when a long meeting needs more than one round.
+    total_folds = _count_folds(len(summaries))
+    folds_done = 0
+
     current = summaries
     round_number = 0
     while len(current) > 1:
@@ -379,18 +402,13 @@ async def _merge(
         batches = [
             current[i : i + MERGE_BATCH_SIZE] for i in range(0, len(current), MERGE_BATCH_SIZE)
         ]
-        _emit(
-            callback,
-            Progress("merging", 0, len(batches), f"Merging {len(current)} summaries"),
-        )
 
         # Batches within a round are independent, so fold them concurrently.
         semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
-        done = 0
         lock = asyncio.Lock()
 
         async def fold(batch: list[str]) -> str:
-            nonlocal done
+            nonlocal folds_done
             if len(batch) == 1:
                 result = batch[0]
             else:
@@ -405,8 +423,11 @@ async def _merge(
                         )
                         result = "\n\n".join(batch)
             async with lock:
-                done += 1
-                _emit(callback, Progress("merging", done, len(batches), "Merging summaries"))
+                folds_done += 1
+                _emit(
+                    callback,
+                    Progress("merging", folds_done, total_folds, "Merging summaries"),
+                )
             return result
 
         current = list(await asyncio.gather(*(fold(b) for b in batches)))
@@ -414,6 +435,27 @@ async def _merge(
             break
 
     return current[0]
+
+
+class PipelineError(RuntimeError):
+    """The run could not produce a usable result."""
+
+    def __init__(self, message: str, *, failed_chunks: int = 0, total_chunks: int = 0) -> None:
+        super().__init__(message)
+        self.failed_chunks = failed_chunks
+        self.total_chunks = total_chunks
+
+
+def _count_folds(count: int) -> int:
+    """Total merge operations needed to reduce *count* summaries to one."""
+    total = 0
+    while count > 1:
+        batches = -(-count // MERGE_BATCH_SIZE)  # ceil division
+        total += batches
+        if batches == count:
+            break  # no progress possible; guard against a pathological batch size
+        count = batches
+    return max(1, total)
 
 
 def _failure_notice(errors: list[str]) -> str:
@@ -492,10 +534,22 @@ async def aprocess_transcript(
     errors = [c.error for c in chunk_results if c.error]
 
     # ── 4. Merge ─────────────────────────────────────────────────────
-    if valid:
-        merged_summary = await _merge(client, valid, temperature, progress_callback)
-    else:
-        merged_summary = _failure_notice(errors) if errors else "No content could be summarised."
+    if not valid and errors:
+        # Every segment failed. There is nothing to summarise, extract or
+        # graph, so surface the failure instead of saving an empty meeting and
+        # calling the run a success.
+        raise PipelineError(
+            "No part of the transcript could be summarised. "
+            f"First error: {errors[0]}",
+            failed_chunks=len(errors),
+            total_chunks=len(chunks),
+        )
+
+    merged_summary = (
+        await _merge(client, valid, temperature, progress_callback)
+        if valid
+        else "No content could be summarised."
+    )
 
     # ── 5. Extract structured data ───────────────────────────────────
     _emit(progress_callback, Progress("extracting", 0, 1, "Extracting action items"))
@@ -597,6 +651,7 @@ def process_transcript(
 # Retained for the ActionItem/Deadline/Decision re-exports some callers expect.
 __all__ = [
     "PROVIDER_REGISTRY",
+    "PipelineError",
     "ActionItem",
     "Deadline",
     "Decision",

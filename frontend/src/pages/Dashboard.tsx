@@ -9,16 +9,18 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [meetings, setMeetings] = useState<MeetingListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   useEffect(() => {
-    Promise.all([api.getStats(), api.listMeetings()])
+    Promise.all([api.getStats(), api.listMeetings({ limit: 10 })])
       .then(([s, m]) => { setStats(s); setMeetings(m) })
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load dashboard'))
       .finally(() => setLoading(false))
   }, [])
 
   if (loading) return <div className="info">Loading...</div>
+  if (error) return <div className="error">{error}</div>
 
   return (
     <div>
@@ -38,7 +40,7 @@ export default function Dashboard() {
       {meetings.length === 0 ? (
         <div className="info">No meetings processed yet. Go to <strong>New Meeting</strong> to get started.</div>
       ) : (
-        meetings.slice(0, 10).map((m) => (
+        meetings.map((m) => (
           <MeetingCard key={m.id} meeting={m} onClick={() => navigate(`/history?meeting=${m.id}`)} />
         ))
       )}

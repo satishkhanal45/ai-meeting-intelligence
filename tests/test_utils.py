@@ -174,3 +174,24 @@ class TestChunkBudgetRegressions:
             for ov in (0, 100, 250, 400)
         ]
         assert counts == sorted(counts)
+
+
+class TestParticipantHeadingFilter:
+    """Section headings share the `Name:` shape and were counted as people."""
+
+    def test_headings_are_not_participants(self):
+        text = """Date: 2026-07-20
+Participants: Alice Chen, Bob Martinez
+Agenda: sprint planning
+Alice: Let's begin.
+Bob: Sounds good.
+Action Items: follow up
+Key Decisions: ship it"""
+        assert detect_participants(text) == ["Alice", "Bob"]
+
+    def test_real_transcript_yields_only_people(self, sample_transcript):
+        participants = detect_participants(clean_transcript(sample_transcript))
+        assert participants == ["Alice", "Bob", "Priya", "Sam", "Diana"]
+
+    def test_filter_is_case_insensitive(self):
+        assert detect_participants("DATE: today\nNotes: none\nZara: hello") == ["Zara"]

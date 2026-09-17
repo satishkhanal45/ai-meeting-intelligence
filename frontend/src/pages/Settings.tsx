@@ -5,16 +5,19 @@ import type { Config, Stats } from '../types'
 export default function Settings() {
   const [config, setConfig] = useState<Config | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     Promise.all([api.getConfig(), api.getStats()])
       .then(([c, s]) => { setConfig(c); setStats(s) })
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load settings'))
   }, [])
 
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem' }}>⚙️ Settings</h2>
+
+      {error && <div className="error">{error}</div>}
 
       <div className="card mb-2">
         <h3 className="mb-2">API Configuration</h3>

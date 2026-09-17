@@ -29,8 +29,13 @@ from database import (
 )
 from jobs import JobStatus, registry
 from logger import get_logger
-from pipeline import PROVIDER_REGISTRY, aprocess_transcript, register_provider
-from providers.errors import ProviderError
+from pipeline import (
+    PROVIDER_REGISTRY,
+    PipelineError,
+    aprocess_transcript,
+    register_provider,
+)
+from providers.errors import ProviderAuthError, ProviderError
 from providers.gemini_provider import AVAILABLE_MODELS as GEMINI_MODELS
 from providers.gemini_provider import DEFAULT_MODEL as GEMINI_DEFAULT
 from providers.gemini_provider import GeminiProvider
@@ -222,6 +227,32 @@ async def process(req: ProcessRequest):
         except ValueError as exc:
             # Caller-supplied problems (unknown provider) are safe to echo.
             job.finish_failure(str(exc))
+        except ProviderAuthError as exc:
+            # A rejected key is the operator's to fix, and saying so plainly
+            # saves them reading the logs. It names no secret.
+            logger.error("Processing failed: provider rejected credentials",
+                         extra={"job_id": job.id, "error": str(exc)})
+            job.finish_failure(
+                "The provider rejected the configured API key. "
+                "Check the key in .env and restart the server."
+            )
+        except PipelineError as exc:
+            error_id = uuid.uuid4().hex[:12]
+            logger.error(
+                "Pipeline produced no usable result",
+                extra={
+                    "error_id": error_id,
+                    "job_id": job.id,
+                    "failed_chunks": exc.failed_chunks,
+                    "total_chunks": exc.total_chunks,
+                    "error": str(exc),
+                },
+            )
+            job.finish_failure(
+                f"None of the {exc.total_chunks} transcript segments could be "
+                "summarised. The provider may be unavailable or rate limited.",
+                error_id,
+            )
         except ProviderError as exc:
             error_id = uuid.uuid4().hex[:12]
             logger.error(

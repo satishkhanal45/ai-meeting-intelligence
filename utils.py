@@ -208,21 +208,66 @@ def chunk_transcript(
 # ── Participant Detection ───────────────────────────────────────────────
 
 
+#: Words that match the speaker pattern but label a section rather than name a
+#: person. Without these, a transcript header like "Date: 2026-07-20" or
+#: "Action Items:" is recorded as a meeting participant.
+_NON_SPEAKER_LABELS = frozenset(
+    {
+        "action",
+        "action item",
+        "action items",
+        "agenda",
+        "attendees",
+        "date",
+        "decision",
+        "decisions",
+        "deadline",
+        "deadlines",
+        "duration",
+        "key decision",
+        "key decisions",
+        "location",
+        "meeting",
+        "minutes",
+        "next step",
+        "next steps",
+        "note",
+        "notes",
+        "participant",
+        "participants",
+        "present",
+        "purpose",
+        "recording",
+        "subject",
+        "summary",
+        "time",
+        "title",
+        "topic",
+        "topics",
+    }
+)
+
+
 def detect_participants(text: str) -> list[str]:
     """Extract likely participant names from a transcript.
 
-    Heuristic: lines matching ``Name:`` or ``[Name]`` patterns.
-    Returns deduplicated list preserving order of first appearance.
+    Heuristic: lines matching ``Name:`` or ``[Name]`` patterns, excluding
+    section headings that share that shape. Returns a deduplicated list in
+    order of first appearance.
     """
     seen: list[str] = []
     seen_set: set[str] = set()
     for line in text.splitlines():
         match = _SPEAKER_PATTERN.match(line)
-        if match:
-            name = match.group("name").strip()
-            if name and name.lower() not in seen_set:
-                seen.append(name)
-                seen_set.add(name.lower())
+        if not match:
+            continue
+        name = match.group("name").strip()
+        if not name or name.lower() in _NON_SPEAKER_LABELS:
+            continue
+        if name.lower() in seen_set:
+            continue
+        seen.append(name)
+        seen_set.add(name.lower())
     return seen
 
 

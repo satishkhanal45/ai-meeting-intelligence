@@ -38,6 +38,9 @@ export interface MeetingListItem {
   created_at: string
   action_item_count: number
   decision_count: number
+  chunk_total: number
+  chunk_failures: number
+  degraded: boolean
 }
 
 export interface Meeting {
@@ -46,6 +49,7 @@ export interface Meeting {
   date: string
   participants: string[]
   provider: string
+  model: string
   processing_time: number
   transcript: Transcript
   summary: Summary
@@ -53,6 +57,13 @@ export interface Meeting {
   deadlines: Deadline[]
   decisions: Decision[]
   graph_data: GraphData
+  chunk_total: number
+  chunk_failures: number
+  input_tokens: number
+  output_tokens: number
+  served_by: string[]
+  degraded: boolean
+  used_fallback: boolean
 }
 
 export interface GraphEntity {
@@ -92,4 +103,34 @@ export interface Health {
   status: string
   database: boolean
   configured_providers: string[]
+}
+
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface Job {
+  job_id: string
+  status: JobStatus
+  stage: string
+  message: string
+  completed: number
+  total: number
+  fraction: number
+  meeting_id: string | null
+  error: string | null
+  error_id: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export interface ProviderInfo {
+  name: string
+  configured: boolean
+  default_model: string
+  available_models: string[]
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[]
+  default_provider: string
+  fallback_chain: string[]
 }

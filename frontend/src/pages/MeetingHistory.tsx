@@ -13,19 +13,41 @@ export default function MeetingHistory() {
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const fetchList = () => {
-    setLoading(true)
-    api.listMeetings(search)
-      .then(setMeetings)
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }
+  const [error, setError] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState(search)
+  const [reloadToken, setReloadToken] = useState(0)
 
-  useEffect(() => { fetchList() }, [search])
+  // Debounce so typing does not fire a request per keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
+
+  useEffect(() => {
+    // Abort the in-flight request when the query changes, so a slow earlier
+    // response cannot overwrite the results of a later one.
+    const controller = new AbortController()
+    setLoading(true)
+    setError('')
+    api
+      .listMeetings({ search: debouncedSearch, signal: controller.signal })
+      .then(setMeetings)
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'Could not load meetings')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
+  }, [debouncedSearch, reloadToken])
 
   useEffect(() => {
     if (!selected) { setMeeting(null); return }
-    api.getMeeting(selected).then(setMeeting).catch(console.error)
+    api
+      .getMeeting(selected)
+      .then(setMeeting)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load meeting'))
   }, [selected])
 
   const handleSelect = (id: string) => {
@@ -34,11 +56,17 @@ export default function MeetingHistory() {
   }
 
   const handleDelete = async (id: string) => {
-    await api.deleteMeeting(id)
+    if (!window.confirm('Delete this meeting? This cannot be undone.')) return
+    try {
+      await api.deleteMeeting(id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete meeting')
+      return
+    }
     setMeeting(null)
     setSelected(null)
     setSearchParams({})
-    fetchList()
+    setReloadToken((n) => n + 1)
   }
 
   return (
@@ -51,6 +79,8 @@ export default function MeetingHistory() {
         value={search}
         onChange={(e) => { setSearch(e.target.value); setSearchParams({ search: e.target.value }) }}
       />
+
+      {error && <div className="error">{error}</div>}
 
       <div style={{ display: 'flex', gap: '2rem' }}>
         <div style={{ flex: selected ? '0 0 380px' : '1' }}>
@@ -75,9 +105,17 @@ export default function MeetingHistory() {
                 🗑️ Delete
               </button>
             </div>
+            {meeting.degraded && (
+              <div className="warning mb-2">
+                ⚠️ Partial result: {meeting.chunk_failures} of {meeting.chunk_total} transcript
+                segments could not be summarised, so this summary is incomplete.
+              </div>
+            )}
             <MeetingTabs meeting={meeting} />
             <div className="meta mt-2" style={{ fontSize: '0.8rem' }}>
-              {meeting.date} &middot; {meeting.participants.join(', ')} &middot; via {meeting.provider}
+              {meeting.date} &middot; {meeting.participants.join(', ')} &middot; via{' '}
+              {meeting.provider}
+              {meeting.model && ` (${meeting.model})`}
             </div>
           </div>
         )}

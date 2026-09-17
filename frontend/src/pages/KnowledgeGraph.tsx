@@ -8,21 +8,30 @@ export default function KnowledgeGraphs() {
   const [selectedId, setSelectedId] = useState<string>('')
   const [graph, setGraph] = useState<KnowledgeGraph | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  useEffect(() => { api.listMeetings().then(setMeetings).catch(console.error) }, [])
+  useEffect(() => {
+    api
+      .listMeetings({ limit: 200 })
+      .then(setMeetings)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load meetings'))
+  }, [])
 
   useEffect(() => {
     if (!selectedId) { setGraph(null); return }
     setLoading(true)
+    setError('')
     api.getGraph(selectedId)
       .then(setGraph)
-      .catch(console.error)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load graph'))
       .finally(() => setLoading(false))
   }, [selectedId])
 
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem' }}>🕸️ Visualization</h2>
+
+      {error && <div className="error">{error}</div>}
 
       {meetings.length === 0 ? (
         <div className="info">No meetings available. Process a meeting first.</div>

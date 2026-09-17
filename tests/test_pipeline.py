@@ -14,11 +14,13 @@ import utils
 from models import ProviderResponse
 from pipeline import (
     PROVIDER_REGISTRY,
+    PipelineError,
     _chunk_cache_key,
     get_provider,
     process_transcript,
     register_provider,
 )
+from providers.errors import ProviderAuthError, ProviderServerError
 from utils import cache_chunk_summary, clear_chunk_cache, get_cached_chunk_summary
 
 
@@ -222,3 +224,103 @@ class TestChunkCacheBounds:
             assert get_cached_chunk_summary(f"key-{last}") == f"summary-{last}"
         finally:
             clear_chunk_cache()
+
+
+class TestTotalFailureIsNotSuccess:
+    """A run where nothing could be summarised must not look like a success.
+
+    Every chunk failing used to still save a meeting -- titled "Untitled
+    Meeting", with no summary, action items or graph -- and report the job as
+    succeeded, leaving only a `degraded` flag to hint that anything was wrong.
+    """
+
+    def test_raises_when_every_chunk_fails(self):
+        class AlwaysFails:
+            name = "broken"
+            model_name = "m"
+
+            async def agenerate(self, prompt, temperature=0.3, system_prompt=""):
+                raise ProviderServerError("upstream down", provider="broken")
+
+            async def agenerate_json(self, prompt, temperature=0.3, system_prompt=""):
+                raise ProviderServerError("upstream down", provider="broken")
+
+        register_provider("broken", AlwaysFails)
+        try:
+            with pytest.raises(PipelineError) as excinfo:
+                process_transcript("Alice: hello there everyone", provider_name="broken")
+            assert excinfo.value.total_chunks >= 1
+            assert excinfo.value.failed_chunks == excinfo.value.total_chunks
+        finally:
+            PROVIDER_REGISTRY.pop("broken", None)
+
+    def test_partial_failure_still_returns_a_meeting(self):
+        class HalfBroken:
+            name = "half"
+            model_name = "m"
+
+            async def agenerate(self, prompt, temperature=0.3, system_prompt=""):
+                if "BROKEN" in prompt:
+                    raise ProviderServerError("upstream down", provider="half")
+                return ProviderResponse(content="a usable summary")
+
+            async def agenerate_json(self, prompt, temperature=0.3, system_prompt=""):
+                if "knowledge graph" in system_prompt.lower():
+                    return ProviderResponse(
+                        content=json.dumps({"entities": [], "relationships": []})
+                    )
+                return ProviderResponse(
+                    content=json.dumps(
+                        {
+                            "title": "Partial",
+                            "participants": [],
+                            "action_items": [],
+                            "deadlines": [],
+                            "decisions": [],
+                        }
+                    )
+                )
+
+        register_provider("half", HalfBroken)
+        try:
+            text = "\n".join(
+                f"Speaker{i}: {'BROKEN' if i == 1 else 'fine'} " + "word " * 120
+                for i in range(4)
+            )
+            meeting = process_transcript(
+                text, provider_name="half", chunk_size=100, chunk_overlap=0
+            )
+            assert meeting.degraded
+            assert 0 < meeting.chunk_failures < meeting.chunk_total
+            assert meeting.summary.executive_summary.strip()
+        finally:
+            PROVIDER_REGISTRY.pop("half", None)
+
+
+class TestAuthFailureAbortsEarly:
+    def test_invalid_key_stops_without_walking_every_chunk(self):
+        attempts = {"n": 0}
+
+        class BadKey:
+            name = "badkey"
+            model_name = "m"
+
+            async def agenerate(self, prompt, temperature=0.3, system_prompt=""):
+                attempts["n"] += 1
+                raise ProviderAuthError("Invalid API Key", provider="badkey")
+
+            async def agenerate_json(self, prompt, temperature=0.3, system_prompt=""):
+                raise ProviderAuthError("Invalid API Key", provider="badkey")
+
+        register_provider("badkey", BadKey)
+        try:
+            text = "\n".join(f"Speaker{i}: " + "word " * 120 for i in range(10))
+            with pytest.raises(ProviderAuthError):
+                process_transcript(
+                    text, provider_name="badkey", chunk_size=100, chunk_overlap=0
+                )
+            # A rejected key fails identically for every chunk, so the run must
+            # stop rather than reattempting the whole transcript.
+            assert attempts["n"] < 10
+        finally:
+            PROVIDER_REGISTRY.pop("badkey", None)
