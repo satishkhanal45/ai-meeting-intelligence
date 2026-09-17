@@ -7,20 +7,18 @@ result views after meeting processing.
 from __future__ import annotations
 
 import json
-import os
 import time
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import streamlit as st
 
 from config import settings
 from database import (
     delete_meeting,
+    get_all_participants,
     get_full_meeting,
     get_meeting_count,
     get_meeting_list,
-    get_all_participants,
     init_db,
     search_meetings,
 )
@@ -35,7 +33,6 @@ from pipeline import get_provider, process_transcript, register_provider
 from providers.gemini_provider import GeminiProvider
 from providers.groq_provider import GroqProvider
 from providers.openrouter_provider import OpenRouterProvider
-from utils import read_transcript_file, truncate
 
 logger = get_logger(__name__)
 
@@ -256,7 +253,8 @@ def render_new_meeting() -> None:
             return
 
         try:
-            provider_instance = get_provider(provider_name)
+            # Validate the provider up front so the error surfaces before processing.
+            get_provider(provider_name)
         except ValueError as exc:
             st.error(str(exc))
             return
@@ -603,6 +601,7 @@ def render_settings() -> None:
 def _clear_all_data() -> None:
     """Drop all data from the database."""
     import sqlite3
+
     from config import DB_PATH
 
     conn = sqlite3.connect(DB_PATH)

@@ -80,7 +80,7 @@ def check_imports() -> list[str]:
 def check_database() -> list[str]:
     errors = []
     try:
-        from database import init_db, get_meeting_count
+        from database import get_meeting_count, init_db
 
         init_db()
         count = get_meeting_count()
@@ -110,7 +110,7 @@ def check_env() -> list[str]:
 
 def main() -> int:
     print(f"\n{'='*60}")
-    print(f"  AI Meeting Intelligence — Validation")
+    print("  AI Meeting Intelligence — Validation")
     print(f"{'='*60}\n")
 
     all_errors: list[str] = []
@@ -153,10 +153,10 @@ def main() -> int:
 
     print("[5/5] Checking provider registration...")
     try:
+        from pipeline import PROVIDER_REGISTRY, register_provider
         from providers.gemini_provider import GeminiProvider
         from providers.groq_provider import GroqProvider
         from providers.openrouter_provider import OpenRouterProvider
-        from pipeline import PROVIDER_REGISTRY, register_provider
 
         register_provider("gemini", GeminiProvider)
         register_provider("groq", GroqProvider)
@@ -175,11 +175,11 @@ def main() -> int:
         print(f"  VALIDATION FAILED — {len(all_errors)} issue(s) found\n")
         for e in all_errors:
             print(f"  ✗ {e}")
-        print(f"\n  Fix the issues above before running the application.")
+        print("\n  Fix the issues above before running the application.")
         return 1
     else:
-        print(f"  ✓ VALIDATION PASSED — All checks OK")
-        print(f"\n  Run:  uv run streamlit run app.py")
+        print("  ✓ VALIDATION PASSED — All checks OK")
+        print("\n  Run:  uv run streamlit run app.py")
         return 0
 
 

@@ -7,7 +7,6 @@ consistent formatting, context enrichment, and both file and console output.
 import json
 import logging
 import sys
-from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR

@@ -6,8 +6,7 @@ a streamlit-agraph compatible configuration for interactive rendering.
 
 from __future__ import annotations
 
-import json
-from typing import Any, Optional
+from typing import Any
 
 import networkx as nx
 
@@ -120,7 +119,7 @@ def build_agraph_nodes_edges(
     Returns ``(nodes, edges)`` suitable for passing to ``agraph()``.
     """
     try:
-        from streamlit_agraph import Node, Edge
+        from streamlit_agraph import Edge, Node
     except ImportError:
         logger.error("streamlit_agraph is not installed")
         return [], []
@@ -169,7 +168,7 @@ def build_agraph_config() -> Any:
     The config enables zoom, pan, drag, and hover interactions.
     """
     try:
-        from streamlit_agraph import Config, ConfigBuilder
+        from streamlit_agraph import Config
     except ImportError:
         logger.error("streamlit_agraph is not installed")
         return None

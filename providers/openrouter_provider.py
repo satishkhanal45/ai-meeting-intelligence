@@ -6,7 +6,6 @@ implementation uses ``httpx`` for maximum compatibility.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -45,7 +44,9 @@ class OpenRouterProvider(BaseProvider):
     def model_name(self) -> str:
         return self._model
 
-    def _call_api(self, messages: list[dict[str, str]], temperature: float, json_mode: bool = False) -> ProviderResponse:
+    def _call_api(
+        self, messages: list[dict[str, str]], temperature: float, json_mode: bool = False
+    ) -> ProviderResponse:
         self._ensure_client()
         start = time.perf_counter()
 
