@@ -28,16 +28,20 @@ from models import (
     Transcript,
 )
 from prompts import (
-    chunk_summary as chunk_summary_prompts,
+    PROMPT_VERSION,
     extract_structured,
-    knowledge_graph as kg_prompts,
     merge_summaries,
+)
+from prompts import (
+    chunk_summary as chunk_summary_prompts,
+)
+from prompts import (
+    knowledge_graph as kg_prompts,
 )
 from utils import (
     cache_chunk_summary,
     chunk_transcript,
     clean_transcript,
-    clear_chunk_cache,
     detect_participants,
     generate_id,
     get_cached_chunk_summary,
@@ -68,8 +72,20 @@ def get_provider(provider_name: str) -> object:
     return cls()
 
 
-def _hash_chunk(text: str) -> str:
-    return hashlib.md5(text.encode()).hexdigest()
+def _chunk_cache_key(
+    text: str, provider_name: str, model: str, temperature: float
+) -> str:
+    """Build a cache key for one chunk summary.
+
+    The key covers everything that can change the summary: the chunk text, the
+    provider and model that produced it, the sampling temperature, and the
+    prompt revision. Keying on the text alone means switching provider or
+    editing a prompt silently returns the previous provider's output.
+    """
+    payload = "\x00".join(
+        [PROMPT_VERSION, provider_name, model, f"{temperature:.4f}", text]
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _safe_json_parse(raw: str, default: dict) -> dict:
@@ -161,9 +177,10 @@ def process_transcript(
         chunks = [cleaned]
 
     # ── 4. Summarise each chunk ──────────────────────────────────────
+    model_name = getattr(provider, "model_name", "")
     chunk_results: list[ChunkResult] = []
     for i, chunk_text in enumerate(chunks):
-        chunk_hash = _hash_chunk(chunk_text)
+        chunk_hash = _chunk_cache_key(chunk_text, provider_name, model_name, temperature)
         cached = get_cached_chunk_summary(chunk_hash)
         if cached:
             chunk_results.append(ChunkResult(index=i, text=chunk_text, summary=cached))
@@ -258,7 +275,7 @@ def process_transcript(
         date=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"),
         participants=all_participants,
         provider=provider_name,
-        processing_time=round(time.perf_counter() - pipeline_start, 2),
+        processing_time=round(time.perf_counter() - pipeline_start, 3),
         transcript=Transcript(raw_text=text, cleaned_text=cleaned),
         summary=Summary(executive_summary=merged_summary),
         action_items=action_items,

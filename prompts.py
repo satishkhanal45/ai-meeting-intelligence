@@ -7,9 +7,9 @@ that can be parsed reliably.
 
 from __future__ import annotations
 
-from typing import Optional
-
-from utils import estimate_tokens
+# Bump whenever a prompt below changes semantically. It is part of the chunk
+# summary cache key, so editing a prompt invalidates stale cached output.
+PROMPT_VERSION = "2026-09-18"
 
 
 def chunk_summary(chunk_text: str, chunk_index: int, total_chunks: int) -> tuple[str, str]:

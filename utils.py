@@ -7,6 +7,7 @@ pipeline and frontend.
 import math
 import re
 import uuid
+from collections import OrderedDict
 from typing import Optional
 
 from config import settings
@@ -110,22 +111,24 @@ def _token_chunks(text: str, chunk_size: int, overlap: int) -> list[str]:
     if not words:
         return []
 
-    # Estimate token count per word: assume average word length ~5 chars → ~1.25 tokens
-    tokens_per_word = _CHARS_PER_TOKEN / 5.0
+    # Derive the tokens-per-word ratio from this text rather than assuming a
+    # fixed average, so the resulting chunks actually land near *chunk_size*.
+    tokens_per_word = max(estimate_tokens(text) / len(words), 1e-6)
 
     chunk_token_size = max(1, chunk_size)
     overlap_token_size = max(0, min(overlap, chunk_token_size - 1))
-    stride = max(1, chunk_token_size - overlap_token_size)
+    stride_tokens = chunk_token_size - overlap_token_size
+
+    word_budget = max(1, int(chunk_token_size / tokens_per_word))
+    stride_words = max(1, int(stride_tokens / tokens_per_word))
 
     chunks: list[str] = []
-    i = 0
-    while i < len(words):
-        # Convert token budget back to word count
-        word_budget = max(1, int(chunk_token_size / tokens_per_word))
+    for i in range(0, len(words), stride_words):
         chunk = " ".join(words[i : i + word_budget])
         if chunk.strip():
             chunks.append(chunk)
-        i += max(1, int(stride / tokens_per_word))
+        if i + word_budget >= len(words):
+            break
 
     return chunks
 
@@ -184,8 +187,10 @@ def chunk_transcript(
     if not text.strip():
         return []
 
-    chunk_size = chunk_size or settings.default_chunk_size
-    overlap = overlap or settings.default_chunk_overlap
+    # Compare against None explicitly: 0 is a meaningful value for both, and
+    # ``or`` would silently replace it with the default.
+    chunk_size = settings.default_chunk_size if chunk_size is None else chunk_size
+    overlap = settings.default_chunk_overlap if overlap is None else overlap
 
     if mode == "speaker":
         chunks = _speaker_chunks(text, chunk_size)
@@ -255,17 +260,29 @@ def read_transcript_file(filepath: str) -> str:
 # ── Chunk Summary Cache ─────────────────────────────────────────────────
 
 
-_chunk_summary_cache: dict[str, str] = {}
+# Bounded LRU cache. An unbounded dict leaks memory for the lifetime of a
+# long-running API process, which summarises a new chunk on almost every request.
+CHUNK_CACHE_MAX_ENTRIES = 512
+
+_chunk_summary_cache: "OrderedDict[str, str]" = OrderedDict()
 
 
 def cache_chunk_summary(chunk_hash: str, summary: str) -> None:
-    """Store a chunk summary in memory."""
+    """Store a chunk summary, evicting the least recently used entry when full."""
+    if chunk_hash in _chunk_summary_cache:
+        _chunk_summary_cache.move_to_end(chunk_hash)
     _chunk_summary_cache[chunk_hash] = summary
+    while len(_chunk_summary_cache) > CHUNK_CACHE_MAX_ENTRIES:
+        evicted, _ = _chunk_summary_cache.popitem(last=False)
+        logger.debug("Chunk cache eviction", extra={"key": evicted})
 
 
 def get_cached_chunk_summary(chunk_hash: str) -> Optional[str]:
     """Retrieve a cached chunk summary, or ``None``."""
-    return _chunk_summary_cache.get(chunk_hash)
+    summary = _chunk_summary_cache.get(chunk_hash)
+    if summary is not None:
+        _chunk_summary_cache.move_to_end(chunk_hash)
+    return summary
 
 
 def clear_chunk_cache() -> None:

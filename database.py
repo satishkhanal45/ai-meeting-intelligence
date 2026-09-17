@@ -8,7 +8,7 @@ import json
 import sqlite3
 import time
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Optional
 
 from config import DB_PATH
 from logger import get_logger
@@ -171,6 +171,11 @@ def insert_meeting(meeting: Meeting) -> None:
             "INSERT OR REPLACE INTO summaries (meeting_id, executive_summary) VALUES (?, ?)",
             (meeting.id, meeting.summary.executive_summary),
         )
+        # The child tables use AUTOINCREMENT ids, so ``INSERT OR REPLACE`` cannot
+        # de-duplicate them. Clear them first, otherwise re-saving a meeting under
+        # the same id appends a second copy of every row.
+        for table in ("action_items", "deadlines", "decisions"):
+            conn.execute(f"DELETE FROM {table} WHERE meeting_id = ?", (meeting.id,))
         for item in meeting.action_items:
             conn.execute(
                 "INSERT INTO action_items (meeting_id, owner, task, priority, status) VALUES (?, ?, ?, ?, ?)",
@@ -219,31 +224,35 @@ def get_meeting_metadata(meeting_id: str) -> Optional[MeetingMetadata]:
     )
 
 
+_MEETING_LIST_SQL = """
+SELECT m.id, m.title, m.date, m.participants, m.provider, m.created_at,
+       (SELECT COUNT(*) FROM action_items WHERE meeting_id = m.id) AS action_count,
+       (SELECT COUNT(*) FROM decisions WHERE meeting_id = m.id) AS decision_count
+FROM meetings m
+"""
+
+
+def _row_to_list_item(row: sqlite3.Row) -> MeetingListItem:
+    """Map a ``_MEETING_LIST_SQL`` row onto a ``MeetingListItem``."""
+    return MeetingListItem(
+        id=row["id"],
+        title=row["title"],
+        date=row["date"],
+        participants=json.loads(row["participants"]),
+        provider=row["provider"],
+        created_at=row["created_at"],
+        action_item_count=row["action_count"],
+        decision_count=row["decision_count"],
+    )
+
+
 def get_meeting_list() -> list[MeetingListItem]:
     """Return all meetings with summary counts for display."""
-    items: list[MeetingListItem] = []
     with get_connection() as conn:
         rows = conn.execute(
-            """SELECT m.id, m.title, m.date, m.participants, m.provider, m.created_at,
-                      (SELECT COUNT(*) FROM action_items WHERE meeting_id = m.id) AS action_count,
-                      (SELECT COUNT(*) FROM decisions WHERE meeting_id = m.id) AS decision_count
-               FROM meetings m
-               ORDER BY m.created_at DESC""",
+            f"{_MEETING_LIST_SQL} ORDER BY m.created_at DESC"
         ).fetchall()
-    for row in rows:
-        items.append(
-            MeetingListItem(
-                id=row["id"],
-                title=row["title"],
-                date=row["date"],
-                participants=json.loads(row["participants"]),
-                provider=row["provider"],
-                created_at=row["created_at"],
-                action_item_count=row["action_count"],
-                decision_count=row["decision_count"],
-            )
-        )
-    return items
+    return [_row_to_list_item(row) for row in rows]
 
 
 def get_full_meeting(meeting_id: str) -> Optional[Meeting]:
@@ -312,13 +321,15 @@ def delete_meeting(meeting_id: str) -> bool:
 # ── Search ──────────────────────────────────────────────────────────────
 
 
-SEARCHABLE_COLUMNS: list[tuple[str, str, str]] = [
-    ("meetings", "m", "title"),
-    ("meetings", "m", "participants"),
-    ("action_items", "ai", "task"),
-    ("action_items", "ai", "owner"),
-    ("decisions", "dec", "decision"),
-    ("deadlines", "dl", "description"),
+# Each entry is ``(table, column)``. Columns on ``meetings`` are matched against
+# ``meetings.id``; columns on child tables are matched against ``meeting_id``.
+SEARCHABLE_COLUMNS: list[tuple[str, str]] = [
+    ("meetings", "title"),
+    ("meetings", "participants"),
+    ("action_items", "task"),
+    ("action_items", "owner"),
+    ("decisions", "decision"),
+    ("deadlines", "description"),
 ]
 
 
@@ -334,42 +345,24 @@ def search_meetings(query: str) -> list[MeetingListItem]:
     meeting_ids: set[str] = set()
 
     with get_connection() as conn:
-        for table, alias, column in SEARCHABLE_COLUMNS:
-            sql = f"SELECT DISTINCT meeting_id FROM {table} WHERE {alias}.{column} LIKE ?"
-            if table == "meetings":
-                sql = f"SELECT id FROM meetings WHERE {column} LIKE ?"
-            rows = conn.execute(sql, (pattern,)).fetchall()
+        for table, column in SEARCHABLE_COLUMNS:
+            id_column = "id" if table == "meetings" else "meeting_id"
+            rows = conn.execute(
+                f"SELECT DISTINCT {id_column} FROM {table} WHERE {column} LIKE ?",
+                (pattern,),
+            ).fetchall()
             meeting_ids.update(row[0] for row in rows)
 
     if not meeting_ids:
         return []
 
     placeholders = ",".join("?" for _ in meeting_ids)
-    items: list[MeetingListItem] = []
     with get_connection() as conn:
         rows = conn.execute(
-            f"""SELECT m.id, m.title, m.date, m.participants, m.provider, m.created_at,
-                       (SELECT COUNT(*) FROM action_items WHERE meeting_id = m.id) AS action_count,
-                       (SELECT COUNT(*) FROM decisions WHERE meeting_id = m.id) AS decision_count
-                FROM meetings m
-                WHERE m.id IN ({placeholders})
-                ORDER BY m.created_at DESC""",
+            f"{_MEETING_LIST_SQL} WHERE m.id IN ({placeholders}) ORDER BY m.created_at DESC",
             tuple(meeting_ids),
         ).fetchall()
-    for row in rows:
-        items.append(
-            MeetingListItem(
-                id=row["id"],
-                title=row["title"],
-                date=row["date"],
-                participants=json.loads(row["participants"]),
-                provider=row["provider"],
-                created_at=row["created_at"],
-                action_item_count=row["action_count"],
-                decision_count=row["decision_count"],
-            )
-        )
-    return items
+    return [_row_to_list_item(row) for row in rows]
 
 
 # ── Utility ─────────────────────────────────────────────────────────────
