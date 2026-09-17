@@ -7,11 +7,13 @@ network calls are made and ``data/meetings.db`` is never touched.
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from models import ProviderResponse
+from providers.errors import ProviderServerError
 
 
 class _MockProvider:
@@ -25,10 +27,12 @@ class _MockProvider:
     def model_name(self) -> str:
         return "mock-model"
 
-    def generate(self, prompt: str, temperature: float = 0.3, system_prompt: str = "") -> ProviderResponse:
+    async def agenerate(
+        self, prompt: str, temperature: float = 0.3, system_prompt: str = ""
+    ) -> ProviderResponse:
         return ProviderResponse(content="Mock summary", model="mock-model")
 
-    def generate_json(self, prompt: str, temperature: float = 0.3, system_prompt: str = "") -> ProviderResponse:
+    async def agenerate_json(self, prompt: str, temperature: float = 0.3, system_prompt: str = "") -> ProviderResponse:
         # The pipeline asks for two different JSON documents; tell them apart the
         # same way a real provider would, from the system prompt.
         if "knowledge graph" in system_prompt.lower():
@@ -71,15 +75,29 @@ def client(monkeypatch, tmp_path):
     PROVIDER_REGISTRY.pop("mock", None)
 
 
+def run_to_completion(client, text: str = "Alice: Let's ship the release.\nBob: Agreed.", **extra):
+    """Submit a transcript and block until its job reaches a terminal state."""
+    response = client.post(
+        "/api/process", json={"text": text, "provider_name": "mock", **extra}
+    )
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        body = client.get(f"/api/jobs/{job_id}").json()
+        if body["status"] in {"succeeded", "failed", "cancelled"}:
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} did not finish in time")
+
+
 @pytest.fixture
 def seeded_meeting(client):
     """Process one transcript through the real pipeline and return its id."""
-    response = client.post(
-        "/api/process",
-        json={"text": "Alice: Let's ship the release.\nBob: Agreed.", "provider_name": "mock"},
-    )
-    assert response.status_code == 200
-    return response.json()["id"]
+    job = run_to_completion(client)
+    assert job["status"] == "succeeded", job
+    return job["meeting_id"]
 
 
 class TestHealth:
@@ -192,13 +210,6 @@ class TestProcessValidation:
         response = client.post("/api/process", json={"text": "hello", "chunk_mode": "sideways"})
         assert response.status_code == 422
 
-    def test_unknown_provider_is_a_client_error(self, client):
-        response = client.post(
-            "/api/process", json={"text": "hello", "provider_name": "not-a-provider"}
-        )
-        assert response.status_code == 400
-        assert "Unknown provider" in response.json()["detail"]
-
     def test_oversized_transcript_is_rejected(self, client):
         from api.schemas import MAX_TRANSCRIPT_CHARS
 
@@ -209,15 +220,139 @@ class TestProcessValidation:
 class TestErrorDisclosure:
     """Internal failure detail must not reach the client."""
 
-    def test_provider_failure_returns_an_opaque_message(self, client, monkeypatch):
-        def boom(*args, **kwargs):
+    def test_job_failure_reports_an_opaque_message(self, client, monkeypatch):
+        async def boom(*args, **kwargs):
             raise RuntimeError("secret detail: /home/user/.env GEMINI_API_KEY=sk-abc123")
 
-        monkeypatch.setattr("api.routes.process_transcript", boom)
-        response = client.post("/api/process", json={"text": "hello", "provider_name": "mock"})
+        monkeypatch.setattr("api.routes.aprocess_transcript", boom)
+        job = run_to_completion(client)
 
-        assert response.status_code == 502
-        detail = response.json()["detail"]
-        assert "secret detail" not in detail
-        assert "sk-abc123" not in detail
-        assert "Error id:" in detail
+        assert job["status"] == "failed"
+        blob = json.dumps(job)
+        assert "secret detail" not in blob
+        assert "sk-abc123" not in blob
+        assert job["error_id"], "a correlation id should be returned for support"
+
+    def test_provider_failure_is_reported_without_internals(self, client, monkeypatch):
+        async def boom(*args, **kwargs):
+            raise ProviderServerError(
+                "upstream said: api_key=sk-secret-value", provider="mock"
+            )
+
+        monkeypatch.setattr("api.routes.aprocess_transcript", boom)
+        job = run_to_completion(client)
+
+        assert job["status"] == "failed"
+        assert "sk-secret-value" not in json.dumps(job)
+
+
+class TestJobs:
+    def test_job_reaches_full_progress(self, client):
+        job = run_to_completion(client)
+        assert job["status"] == "succeeded"
+        assert job["fraction"] == 1.0
+        assert job["stage"] == "done"
+        assert job["finished_at"]
+
+    def test_unknown_job_is_404(self, client):
+        assert client.get("/api/jobs/nope").status_code == 404
+        assert client.delete("/api/jobs/nope").status_code == 404
+
+    def test_cancelling_a_finished_job_is_409(self, client):
+        response = client.post(
+            "/api/process", json={"text": "Alice: hi there", "provider_name": "mock"}
+        )
+        job_id = response.json()["job_id"]
+        run_deadline = time.monotonic() + 15
+        while time.monotonic() < run_deadline:
+            if client.get(f"/api/jobs/{job_id}").json()["status"] == "succeeded":
+                break
+            time.sleep(0.02)
+        assert client.delete(f"/api/jobs/{job_id}").status_code == 409
+
+    def test_events_stream_reports_progress_then_completion(self, client):
+        response = client.post(
+            "/api/process",
+            json={
+                "text": "\n".join(f"Speaker{i}: " + "word " * 120 for i in range(6)),
+                "provider_name": "mock",
+                "chunk_size": 100,
+                "chunk_overlap": 0,
+            },
+        )
+        job_id = response.json()["job_id"]
+
+        events = []
+        with client.stream("GET", f"/api/jobs/{job_id}/events") as stream:
+            assert stream.status_code == 200
+            assert stream.headers["content-type"].startswith("text/event-stream")
+            for line in stream.iter_lines():
+                if line.startswith("data: "):
+                    event = json.loads(line[len("data: ") :])
+                    events.append(event)
+                    if event["status"] in {"succeeded", "failed"}:
+                        break
+
+        assert events[-1]["status"] == "succeeded"
+        assert events[-1]["fraction"] == 1.0
+        fractions = [e["fraction"] for e in events]
+        # A progress bar must never run backwards, including across the
+        # multiple rounds the merge stage needs for a long transcript.
+        assert fractions == sorted(fractions)
+
+    def test_events_for_unknown_job_is_404(self, client):
+        assert client.get("/api/jobs/nope/events").status_code == 404
+
+
+class TestProvidersEndpoint:
+    def test_lists_providers_and_models(self, client):
+        body = client.get("/api/providers").json()
+        names = {p["name"] for p in body["providers"]}
+        assert names == {"gemini", "groq", "openrouter"}
+        for provider in body["providers"]:
+            assert provider["default_model"]
+            assert provider["default_model"] in provider["available_models"]
+
+    def test_reports_which_providers_are_configured(self, client):
+        body = client.get("/api/providers").json()
+        for provider in body["providers"]:
+            assert isinstance(provider["configured"], bool)
+
+
+class TestProcessGuards:
+    def test_unknown_provider_is_rejected(self, client):
+        response = client.post(
+            "/api/process", json={"text": "hello", "provider_name": "not-a-provider"}
+        )
+        assert response.status_code == 400
+        assert "Unknown provider" in response.json()["detail"]
+
+    def test_unconfigured_builtin_provider_is_rejected(self, client, monkeypatch):
+        from config import Settings
+
+        # Patch the class, not the instance: pydantic-settings rejects
+        # attributes that are not declared fields.
+        monkeypatch.setattr(Settings, "is_provider_configured", lambda self, name: False)
+        response = client.post(
+            "/api/process", json={"text": "hello", "provider_name": "openrouter"}
+        )
+        assert response.status_code == 400
+        assert "not configured" in response.json()["detail"]
+
+
+class TestPagination:
+    def test_limit_caps_the_page(self, client):
+        for index in range(3):
+            run_to_completion(client, text=f"Alice: meeting number {index} content here")
+        assert len(client.get("/api/meetings", params={"limit": 2}).json()) == 2
+
+    def test_offset_walks_the_list(self, client):
+        for index in range(3):
+            run_to_completion(client, text=f"Alice: meeting number {index} content here")
+        first = client.get("/api/meetings", params={"limit": 1, "offset": 0}).json()
+        second = client.get("/api/meetings", params={"limit": 1, "offset": 1}).json()
+        assert first[0]["id"] != second[0]["id"]
+
+    def test_invalid_limit_is_rejected(self, client):
+        assert client.get("/api/meetings", params={"limit": 0}).status_code == 422
+        assert client.get("/api/meetings", params={"limit": 10_000}).status_code == 422

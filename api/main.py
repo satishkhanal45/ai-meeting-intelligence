@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from api.routes import router
 from config import settings
 from database import init_db
+from jobs import registry
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +23,8 @@ async def lifespan(app: FastAPI):
     """Prepare the database on startup rather than as an import side effect."""
     init_db()
     yield
+    # Cancel in-flight jobs so the process can exit without orphaned tasks.
+    await registry.shutdown()
 
 
 app = FastAPI(

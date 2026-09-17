@@ -14,6 +14,8 @@ class ProcessRequest(BaseModel):
     chunk_size: int | None = Field(default=None, ge=100, le=100_000)
     chunk_overlap: int | None = Field(default=None, ge=0)
     chunk_mode: str = Field(default="token", pattern="^(token|speaker)$")
+    #: Optional model override. Empty uses the provider's default.
+    model: str = Field(default="", max_length=200)
 
 
 class StatsResponse(BaseModel):
@@ -40,3 +42,38 @@ class HealthResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     error_id: str | None = None
+
+
+class ProcessAcceptedResponse(BaseModel):
+    """Returned by POST /api/process, which now enqueues rather than blocks."""
+
+    job_id: str
+    status: str
+
+
+class JobResponse(BaseModel):
+    job_id: str
+    status: str
+    stage: str
+    message: str
+    completed: int
+    total: int
+    fraction: float
+    meeting_id: str | None = None
+    error: str | None = None
+    error_id: str | None = None
+    created_at: str
+    finished_at: str | None = None
+
+
+class ProviderInfo(BaseModel):
+    name: str
+    configured: bool
+    default_model: str
+    available_models: list[str]
+
+
+class ProvidersResponse(BaseModel):
+    providers: list[ProviderInfo]
+    default_provider: str
+    fallback_chain: list[str]
