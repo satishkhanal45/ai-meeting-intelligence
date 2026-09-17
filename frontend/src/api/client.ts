@@ -1,4 +1,4 @@
-import type { Config, KnowledgeGraph, Meeting, MeetingListItem, Stats } from '../types'
+import type { Config, Health, KnowledgeGraph, Meeting, MeetingListItem, Stats } from '../types'
 
 const BASE = '/api'
 
@@ -57,5 +57,5 @@ export const api = {
 
   getConfig: () => request<Config>('/config'),
 
-  checkHealth: () => request<{ status: string }>('/config'),
+  checkHealth: () => request<Health>('/health'),
 }

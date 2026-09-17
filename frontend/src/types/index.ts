@@ -87,3 +87,9 @@ export interface Config {
   default_chunk_overlap: number
   configured_providers: string[]
 }
+
+export interface Health {
+  status: string
+  database: boolean
+  configured_providers: string[]
+}

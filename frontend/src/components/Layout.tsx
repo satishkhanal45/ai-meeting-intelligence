@@ -19,7 +19,7 @@ export default function Layout({ children }: LayoutProps) {
         <h1>🧠 Meeting AI</h1>
         <nav>
           {NAV.map(({ path, label, icon }) => (
-            <NavLink to={path} className={({ isActive }) => isActive ? 'active' : ''} end={path === '/'}>
+            <NavLink key={path} to={path} className={({ isActive }) => isActive ? 'active' : ''} end={path === '/'}>
               <span>{icon}</span>
               <span>{label}</span>
             </NavLink>
