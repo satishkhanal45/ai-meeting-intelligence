@@ -211,6 +211,49 @@ class Meeting(BaseModel):
         return bool(self.served_by) and any(s != self.provider for s in self.served_by)
 
 
+class OwnedActionItem(ActionItem):
+    """An action item carrying the meeting it came from.
+
+    The cross-meeting workspace and person pages need to link back to the
+    source meeting, which a bare ActionItem cannot express.
+    """
+
+    meeting_id: str = ""
+    meeting_title: str = ""
+
+
+class DatedDeadline(Deadline):
+    """A deadline carrying its source meeting, for the timeline view."""
+
+    meeting_id: str = ""
+    meeting_title: str = ""
+
+
+class PersonSummary(BaseModel):
+    """One row in the people list."""
+
+    id: str
+    name: str
+    meeting_count: int = 0
+    action_item_count: int = 0
+    open_action_item_count: int = 0
+    last_seen: str = ""
+
+
+class PersonDetail(BaseModel):
+    """Everything attributed to one person across every meeting."""
+
+    id: str
+    name: str
+    meetings: list[MeetingListItem] = Field(default_factory=list)
+    action_items: list[OwnedActionItem] = Field(default_factory=list)
+
+    @computed_field
+    @property
+    def open_action_items(self) -> int:
+        return sum(1 for i in self.action_items if i.status in ("open", "in_progress"))
+
+
 class ProviderResponse(BaseModel):
     content: str = ""
     model: str = ""

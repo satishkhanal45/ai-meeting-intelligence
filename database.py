@@ -4,6 +4,7 @@ Handles schema creation, CRUD operations, and full-text search for all
 meeting-related data. Uses WAL mode for better concurrent read performance.
 """
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -16,12 +17,16 @@ from config import DB_PATH
 from logger import get_logger
 from models import (
     ActionItem,
+    DatedDeadline,
     Deadline,
     Decision,
     GraphData,
     Meeting,
     MeetingListItem,
     MeetingMetadata,
+    OwnedActionItem,
+    PersonDetail,
+    PersonSummary,
     Summary,
     Transcript,
 )
@@ -188,6 +193,24 @@ MIGRATIONS: list[tuple[str, str]] = [
         ALTER TABLE meetings ADD COLUMN served_by TEXT NOT NULL DEFAULT '';
         """,
     ),
+    (
+        "normalise participants into their own tables",
+        """
+        CREATE TABLE IF NOT EXISTS people (
+            id             TEXT PRIMARY KEY,
+            canonical_name TEXT NOT NULL,
+            sort_key       TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS meeting_participants (
+            meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+            person_id  TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+            PRIMARY KEY (meeting_id, person_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_participants_person
+            ON meeting_participants(person_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_people_sort_key ON people(sort_key);
+        """,
+    ),
 ]
 
 
@@ -222,6 +245,7 @@ def init_db() -> None:
         conn.executescript(SCHEMA_SQL)
         _apply_migrations(conn)
     rebuild_search_index()
+    rebuild_people_index()
     logger.info("Database initialised", extra={"path": DB_PATH})
 
 
@@ -288,6 +312,7 @@ def insert_meeting(meeting: Meeting) -> None:
             "INSERT OR REPLACE INTO graph_data (meeting_id, graph_json) VALUES (?, ?)",
             (meeting.id, meeting.graph_data.graph_json),
         )
+        _sync_participants(conn, meeting.id, meeting.participants)
         _index_meeting(conn, meeting.id)
     logger.info(
         "Meeting saved",
@@ -437,6 +462,12 @@ def delete_meeting(meeting_id: str) -> bool:
             return False
         if _has_fts(conn):
             conn.execute("DELETE FROM meetings_fts WHERE meeting_id = ?", (meeting_id,))
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='people'"
+        ).fetchone():
+            # The cascade removes the links; the people rows they pointed at
+            # can be left with nothing to belong to.
+            _prune_orphan_people(conn)
     logger.info("Meeting deleted", extra={"meeting_id": meeting_id})
     return True
 
@@ -731,3 +762,239 @@ def update_meeting_fields(meeting_id: str, title: Optional[str] = None) -> bool:
         _touch_meeting(conn, meeting_id)
     logger.info("Meeting updated", extra={"meeting_id": meeting_id})
     return True
+
+
+# ── People ──────────────────────────────────────────────────────────────
+#
+# meetings.participants remains the authoritative per-meeting list, because it
+# is what the pipeline produced. These tables are a queryable projection of it:
+# without them, "every meeting Alice attended" means deserialising a JSON blob
+# for every row in the table.
+
+
+def _person_key(name: str) -> str:
+    """Normalise a name for identity comparison."""
+    return " ".join(name.lower().split())
+
+
+def _sync_participants(conn: sqlite3.Connection, meeting_id: str, names: list[str]) -> None:
+    """Rewrite one meeting's rows in the people projection."""
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='people'"
+    ).fetchone() is None:
+        return
+
+    conn.execute("DELETE FROM meeting_participants WHERE meeting_id = ?", (meeting_id,))
+    for name in names:
+        key = _person_key(name)
+        if not key:
+            continue
+        row = conn.execute("SELECT id FROM people WHERE sort_key = ?", (key,)).fetchone()
+        if row is None:
+            person_id = hashlib.sha1(key.encode()).hexdigest()[:16]
+            conn.execute(
+                "INSERT OR IGNORE INTO people (id, canonical_name, sort_key) VALUES (?, ?, ?)",
+                (person_id, name, key),
+            )
+        else:
+            person_id = row["id"]
+        conn.execute(
+            "INSERT OR IGNORE INTO meeting_participants (meeting_id, person_id) VALUES (?, ?)",
+            (meeting_id, person_id),
+        )
+
+    _prune_orphan_people(conn)
+
+
+def _prune_orphan_people(conn: sqlite3.Connection) -> None:
+    """Drop people who are no longer named in any meeting.
+
+    A person only exists by virtue of attending something, so once their last
+    meeting is deleted or they are edited out of its participants, the row
+    should go too rather than lingering in the people list with zero meetings.
+    """
+    conn.execute(
+        """DELETE FROM people
+           WHERE id NOT IN (SELECT DISTINCT person_id FROM meeting_participants)"""
+    )
+
+
+def rebuild_people_index() -> None:
+    """Repopulate the people projection from meetings.participants.
+
+    Runs at startup so databases written before these tables existed, or by an
+    older build, gain person pages without manual intervention.
+    """
+    with get_transaction() as conn:
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='people'"
+        ).fetchone() is None:
+            return
+        linked = conn.execute("SELECT COUNT(DISTINCT meeting_id) FROM meeting_participants").fetchone()[0]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM meetings WHERE participants NOT IN ('[]', '')"
+        ).fetchone()[0]
+        if linked >= total:
+            return
+        for row in conn.execute("SELECT id, participants FROM meetings").fetchall():
+            try:
+                names = json.loads(row["participants"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(names, list):
+                _sync_participants(conn, row["id"], [n for n in names if isinstance(n, str)])
+        logger.info("People index rebuilt", extra={"meetings": total})
+
+
+def list_people() -> list[PersonSummary]:
+    """Every known person with their meeting and action-item counts."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.canonical_name,
+                   COUNT(DISTINCT mp.meeting_id) AS meeting_count,
+                   (SELECT COUNT(*) FROM action_items ai
+                     WHERE LOWER(TRIM(ai.owner)) = p.sort_key) AS action_item_count,
+                   (SELECT COUNT(*) FROM action_items ai
+                     WHERE LOWER(TRIM(ai.owner)) = p.sort_key
+                       AND ai.status IN ('open', 'in_progress')) AS open_action_item_count,
+                   MAX(m.created_at) AS last_seen
+            FROM people p
+            LEFT JOIN meeting_participants mp ON mp.person_id = p.id
+            LEFT JOIN meetings m ON m.id = mp.meeting_id
+            GROUP BY p.id
+            ORDER BY meeting_count DESC, p.canonical_name
+            """
+        ).fetchall()
+    return [
+        PersonSummary(
+            id=row["id"],
+            name=row["canonical_name"],
+            meeting_count=row["meeting_count"],
+            action_item_count=row["action_item_count"],
+            open_action_item_count=row["open_action_item_count"],
+            last_seen=row["last_seen"] or "",
+        )
+        for row in rows
+    ]
+
+
+def get_person(person_id: str) -> Optional[PersonDetail]:
+    """One person with their meetings and every action item assigned to them."""
+    with get_connection() as conn:
+        person = conn.execute(
+            "SELECT id, canonical_name, sort_key FROM people WHERE id = ?", (person_id,)
+        ).fetchone()
+        if person is None:
+            return None
+
+        meeting_rows = conn.execute(
+            f"""{_MEETING_LIST_SQL}
+                JOIN meeting_participants mp ON mp.meeting_id = m.id
+                WHERE mp.person_id = ?
+                ORDER BY m.created_at DESC""",
+            (person_id,),
+        ).fetchall()
+
+        # Action items are matched by owner name, which is what the model
+        # produced; there is no foreign key from an item to a person.
+        item_rows = conn.execute(
+            """SELECT ai.id, ai.owner, ai.task, ai.priority, ai.status,
+                      ai.meeting_id, m.title AS meeting_title
+               FROM action_items ai
+               JOIN meetings m ON m.id = ai.meeting_id
+               WHERE LOWER(TRIM(ai.owner)) = ?
+               ORDER BY
+                 CASE ai.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                 CASE ai.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                 m.created_at DESC""",
+            (person["sort_key"],),
+        ).fetchall()
+
+    return PersonDetail(
+        id=person["id"],
+        name=person["canonical_name"],
+        meetings=[_row_to_list_item(row) for row in meeting_rows],
+        action_items=[
+            OwnedActionItem(
+                id=row["id"],
+                owner=row["owner"],
+                task=row["task"],
+                priority=row["priority"],
+                status=row["status"],
+                meeting_id=row["meeting_id"],
+                meeting_title=row["meeting_title"],
+            )
+            for row in item_rows
+        ],
+    )
+
+
+def list_action_items(
+    status: str = "",
+    owner: str = "",
+    limit: int = 500,
+    offset: int = 0,
+) -> list[OwnedActionItem]:
+    """Action items across every meeting, for a cross-meeting workspace."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if status:
+        clauses.append("ai.status = ?")
+        params.append(status)
+    if owner:
+        clauses.append("LOWER(TRIM(ai.owner)) = ?")
+        params.append(_person_key(owner))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""SELECT ai.id, ai.owner, ai.task, ai.priority, ai.status,
+                       ai.meeting_id, m.title AS meeting_title
+                FROM action_items ai
+                JOIN meetings m ON m.id = ai.meeting_id
+                {where}
+                ORDER BY
+                  CASE ai.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END,
+                  CASE ai.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                  m.created_at DESC
+                LIMIT ? OFFSET ?""",
+            (*params, limit, offset),
+        ).fetchall()
+    return [
+        OwnedActionItem(
+            id=row["id"],
+            owner=row["owner"],
+            task=row["task"],
+            priority=row["priority"],
+            status=row["status"],
+            meeting_id=row["meeting_id"],
+            meeting_title=row["meeting_title"],
+        )
+        for row in rows
+    ]
+
+
+def list_deadlines(limit: int = 500) -> list[DatedDeadline]:
+    """Every deadline with its meeting, for a timeline view."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT d.id, d.description, d.date, d.type, d.meeting_id,
+                      m.title AS meeting_title
+               FROM deadlines d
+               JOIN meetings m ON m.id = d.meeting_id
+               ORDER BY d.date, m.created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [
+        DatedDeadline(
+            id=row["id"],
+            description=row["description"],
+            date=row["date"],
+            type=row["type"],
+            meeting_id=row["meeting_id"],
+            meeting_title=row["meeting_title"],
+        )
+        for row in rows
+    ]

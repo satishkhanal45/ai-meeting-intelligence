@@ -1,17 +1,33 @@
+export type ActionStatus = 'open' | 'in_progress' | 'done' | 'cancelled'
+export type ActionPriority = 'high' | 'medium' | 'low'
+
 export interface ActionItem {
+  id: number
   owner: string
   task: string
-  priority: string
-  status: string
+  priority: ActionPriority
+  status: ActionStatus
+}
+
+export interface OwnedActionItem extends ActionItem {
+  meeting_id: string
+  meeting_title: string
 }
 
 export interface Deadline {
+  id: number
   description: string
   date: string
   type: string
 }
 
+export interface DatedDeadline extends Deadline {
+  meeting_id: string
+  meeting_title: string
+}
+
 export interface Decision {
+  id: number
   decision: string
   rationale: string
 }
@@ -134,3 +150,22 @@ export interface ProvidersResponse {
   default_provider: string
   fallback_chain: string[]
 }
+
+export interface PersonSummary {
+  id: string
+  name: string
+  meeting_count: number
+  action_item_count: number
+  open_action_item_count: number
+  last_seen: string
+}
+
+export interface PersonDetail {
+  id: string
+  name: string
+  meetings: MeetingListItem[]
+  action_items: OwnedActionItem[]
+  open_action_items: number
+}
+
+export type ItemKind = 'action-items' | 'deadlines' | 'decisions'

@@ -4,6 +4,9 @@ const NAV = [
   { path: '/', label: 'Dashboard', icon: '📊' },
   { path: '/new', label: 'New Meeting', icon: '📝' },
   { path: '/history', label: 'Meeting History', icon: '📚' },
+  { path: '/actions', label: 'Action Items', icon: '📋' },
+  { path: '/deadlines', label: 'Deadlines', icon: '📅' },
+  { path: '/people', label: 'People', icon: '👥' },
   { path: '/graph', label: 'Visualization', icon: '🕸️' },
   { path: '/settings', label: 'Settings', icon: '⚙️' },
 ]

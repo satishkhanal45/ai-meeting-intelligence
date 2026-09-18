@@ -36,6 +36,10 @@ from database import (
     get_meeting_count,
     get_meeting_list,
     get_meeting_metadata,
+    get_person,
+    list_action_items,
+    list_deadlines,
+    list_people,
     search_meetings,
     update_child,
     update_meeting_fields,
@@ -49,6 +53,7 @@ from exporters import (
 )
 from jobs import JobStatus, registry
 from logger import get_logger
+from models import DatedDeadline, OwnedActionItem, PersonDetail, PersonSummary
 from pipeline import (
     PROVIDER_REGISTRY,
     PipelineError,
@@ -197,6 +202,41 @@ def get_meeting_graph(meeting_id: str):
         "entities": graph_data.get("entities") or [],
         "relationships": graph_data.get("relationships") or [],
     }
+
+
+# ── People and cross-meeting views ──────────────────────────────────────
+
+
+@router.get("/people", response_model=list[PersonSummary])
+def get_people():
+    """Everyone who has appeared in a meeting, with their workload."""
+    return list_people()
+
+
+@router.get("/people/{person_id}", response_model=PersonDetail)
+def get_person_detail(person_id: str):
+    """One person: every meeting they attended and every action they own."""
+    person = get_person(person_id)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return person
+
+
+@router.get("/action-items", response_model=list[OwnedActionItem])
+def get_action_items(
+    status: str = Query(default="", pattern="^(|open|in_progress|done|cancelled)$"),
+    owner: str = "",
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """Action items across every meeting, for a single cross-meeting view."""
+    return list_action_items(status=status, owner=owner, limit=limit, offset=offset)
+
+
+@router.get("/deadlines", response_model=list[DatedDeadline])
+def get_deadlines(limit: int = Query(default=200, ge=1, le=1000)):
+    """Every deadline with its meeting, for a timeline."""
+    return list_deadlines(limit=limit)
 
 
 # ── Editing extracted items ─────────────────────────────────────────────

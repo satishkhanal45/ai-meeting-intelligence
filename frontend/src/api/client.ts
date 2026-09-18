@@ -1,10 +1,16 @@
 import type {
+  ActionItem,
   Config,
+  DatedDeadline,
   Health,
+  ItemKind,
   Job,
   KnowledgeGraph,
   Meeting,
   MeetingListItem,
+  OwnedActionItem,
+  PersonDetail,
+  PersonSummary,
   ProvidersResponse,
   Stats,
 } from '../types'
@@ -84,6 +90,48 @@ export const api = {
   getJob: (jobId: string) => request<Job>(`/jobs/${jobId}`),
 
   cancelJob: (jobId: string) => request<void>(`/jobs/${jobId}`, { method: 'DELETE' }),
+
+  // ── Cross-meeting views ──
+  listPeople: () => request<PersonSummary[]>('/people'),
+
+  getPerson: (id: string) => request<PersonDetail>(`/people/${id}`),
+
+  listActionItems: (opts: { status?: string; owner?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (opts.status) params.set('status', opts.status)
+    if (opts.owner) params.set('owner', opts.owner)
+    params.set('limit', String(opts.limit ?? 200))
+    return request<OwnedActionItem[]>(`/action-items?${params}`)
+  },
+
+  listDeadlines: (limit = 200) => request<DatedDeadline[]>(`/deadlines?limit=${limit}`),
+
+  // ── Editing extracted items ──
+  updateMeeting: (id: string, body: { title?: string }) =>
+    request<unknown>(`/meetings/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  updateItem: (kind: ItemKind, itemId: number, body: Partial<ActionItem> | Record<string, string>) =>
+    request<Meeting>(`/items/${kind}/${itemId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+
+  createItem: (meetingId: string, kind: ItemKind, body: Record<string, string>) =>
+    request<{ id: number }>(`/meetings/${meetingId}/${kind}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteItem: (kind: ItemKind, itemId: number) =>
+    request<void>(`/items/${kind}/${itemId}`, { method: 'DELETE' }),
+
+  /** Export URLs are plain links so the browser handles the download. */
+  exportMeetingUrl: (id: string, format: 'md' | 'csv' | 'ics' | 'json') =>
+    `${BASE}/meetings/${id}/export?format=${format}`,
+
+  exportActionItemsUrl: () => `${BASE}/export/action-items`,
+
+  exportDeadlinesUrl: () => `${BASE}/export/deadlines.ics`,
 
   getConfig: () => request<Config>('/config'),
 

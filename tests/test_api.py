@@ -533,3 +533,41 @@ class TestExportEndpoints:
             f"/api/meetings/{seeded_meeting}/export", params={"format": "md"}
         ).text
         assert "- [x]" in markdown
+
+
+class TestPeopleEndpoints:
+    def test_people_are_listed(self, client, seeded_meeting):
+        people = client.get("/api/people").json()
+        assert any(p["name"] == "Alice" for p in people)
+
+    def test_person_detail_links_back_to_meetings(self, client, seeded_meeting):
+        person = next(p for p in client.get("/api/people").json() if p["name"] == "Alice")
+        detail = client.get(f"/api/people/{person['id']}").json()
+        assert [m["id"] for m in detail["meetings"]] == [seeded_meeting]
+        assert detail["action_items"][0]["meeting_id"] == seeded_meeting
+
+    def test_unknown_person_is_404(self, client):
+        assert client.get("/api/people/nope").status_code == 404
+
+    def test_action_items_endpoint_spans_meetings(self, client):
+        run_to_completion(client, text="Alice: first meeting content here")
+        run_to_completion(client, text="Alice: second meeting content here")
+        items = client.get("/api/action-items").json()
+        assert len(items) == 2
+        assert len({i["meeting_id"] for i in items}) == 2
+
+    def test_action_items_filter_by_status(self, client, seeded_meeting):
+        assert len(client.get("/api/action-items", params={"status": "open"}).json()) == 1
+        assert client.get("/api/action-items", params={"status": "done"}).json() == []
+
+    def test_invalid_status_filter_is_rejected(self, client):
+        assert client.get("/api/action-items", params={"status": "nope"}).status_code == 422
+
+    def test_deadlines_endpoint(self, client, seeded_meeting):
+        assert isinstance(client.get("/api/deadlines").json(), list)
+
+    def test_completing_an_item_moves_it_between_filters(self, client, seeded_meeting):
+        item = client.get("/api/action-items", params={"status": "open"}).json()[0]
+        client.patch(f"/api/items/action-items/{item['id']}", json={"status": "done"})
+        assert client.get("/api/action-items", params={"status": "open"}).json() == []
+        assert len(client.get("/api/action-items", params={"status": "done"}).json()) == 1

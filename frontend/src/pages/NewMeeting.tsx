@@ -251,7 +251,7 @@ export default function NewMeeting() {
             </div>
           )}
 
-          <MeetingTabs meeting={result} />
+          <MeetingTabs meeting={result} onChange={setResult} />
           <div className="meta mt-2" style={{ fontSize: '0.8rem' }}>
             {result.provider}
             {result.model && ` · ${result.model}`} &middot; {result.processing_time}s &middot;{' '}

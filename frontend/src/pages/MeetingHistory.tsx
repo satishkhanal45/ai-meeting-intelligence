@@ -14,6 +14,7 @@ export default function MeetingHistory() {
   const [loading, setLoading] = useState(true)
 
   const [error, setError] = useState('')
+  const [originalTitle, setOriginalTitle] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState(search)
   const [reloadToken, setReloadToken] = useState(0)
 
@@ -46,7 +47,10 @@ export default function MeetingHistory() {
     if (!selected) { setMeeting(null); return }
     api
       .getMeeting(selected)
-      .then(setMeeting)
+      .then((m) => {
+        setMeeting(m)
+        setOriginalTitle(m.title)
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Could not load meeting'))
   }, [selected])
 
@@ -99,11 +103,38 @@ export default function MeetingHistory() {
 
         {meeting && (
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="flex-between mb-2">
-              <h3 style={{ margin: 0 }}>{meeting.title}</h3>
-              <button className="btn btn-danger" onClick={() => handleDelete(meeting.id)}>
-                🗑️ Delete
-              </button>
+            <div className="flex-between mb-2" style={{ gap: '1rem' }}>
+              <input
+                className="input title-input"
+                value={meeting.title}
+                aria-label="Meeting title"
+                onChange={(e) => setMeeting({ ...meeting, title: e.target.value })}
+                onBlur={async (e) => {
+                  const title = e.target.value.trim()
+                  if (!title || title === originalTitle) return
+                  try {
+                    await api.updateMeeting(meeting.id, { title })
+                    setOriginalTitle(title)
+                    setReloadToken((n) => n + 1)
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : 'Could not rename meeting')
+                  }
+                }}
+              />
+              <div className="flex gap-1" style={{ whiteSpace: 'nowrap' }}>
+                <a className="btn btn-small" href={api.exportMeetingUrl(meeting.id, 'md')} download>
+                  ⬇️ MD
+                </a>
+                <a className="btn btn-small" href={api.exportMeetingUrl(meeting.id, 'csv')} download>
+                  CSV
+                </a>
+                <a className="btn btn-small" href={api.exportMeetingUrl(meeting.id, 'ics')} download>
+                  ICS
+                </a>
+                <button className="btn btn-danger btn-small" onClick={() => handleDelete(meeting.id)}>
+                  🗑️
+                </button>
+              </div>
             </div>
             {meeting.degraded && (
               <div className="warning mb-2">
@@ -111,7 +142,7 @@ export default function MeetingHistory() {
                 segments could not be summarised, so this summary is incomplete.
               </div>
             )}
-            <MeetingTabs meeting={meeting} />
+            <MeetingTabs meeting={meeting} onChange={setMeeting} />
             <div className="meta mt-2" style={{ fontSize: '0.8rem' }}>
               {meeting.date} &middot; {meeting.participants.join(', ')} &middot; via{' '}
               {meeting.provider}
