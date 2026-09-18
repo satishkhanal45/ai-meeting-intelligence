@@ -8,6 +8,7 @@ import math
 import re
 import uuid
 from collections import OrderedDict
+from collections.abc import Iterable
 from typing import Optional
 
 from config import settings
@@ -269,6 +270,29 @@ def detect_participants(text: str) -> list[str]:
         seen.append(name)
         seen_set.add(name.lower())
     return seen
+
+
+def merge_participant_names(names: Iterable[str]) -> list[str]:
+    """Collapse the same person appearing under a short and a full name.
+
+    Speaker labels give first names ("Alice"), while the extraction step
+    returns full names ("Alice Chen"), so a naive union lists everyone twice
+    and doubles the unique-participant count. When one name is the leading
+    part of another, keep the longer, more specific form.
+    """
+    ordered = list(dict.fromkeys(n.strip() for n in names if n and n.strip()))
+    kept: list[str] = []
+
+    for name in sorted(ordered, key=lambda n: (-len(n.split()), -len(n))):
+        tokens = name.lower().split()
+        # Skip if an already-kept name starts with this one's tokens.
+        if any(k.lower().split()[: len(tokens)] == tokens for k in kept):
+            continue
+        kept.append(name)
+
+    # Restore first-appearance order from the input.
+    position = {n: i for i, n in enumerate(ordered)}
+    return sorted(kept, key=lambda n: position[n])
 
 
 # ── Text Helpers ────────────────────────────────────────────────────────

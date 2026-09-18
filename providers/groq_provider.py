@@ -26,6 +26,9 @@ from .errors import (
 DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 #: Models this provider exposes, for the /api/providers endpoint.
+#: Not verified against the live API -- no working Groq key was available when
+#: this list was written. Groq retires models, so confirm against
+#: https://console.groq.com/docs/models if a request 404s.
 AVAILABLE_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",

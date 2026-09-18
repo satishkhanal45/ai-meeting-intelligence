@@ -54,6 +54,7 @@ from utils import (
     detect_participants,
     generate_id,
     get_cached_chunk_summary,
+    merge_participant_names,
 )
 
 logger = get_logger(__name__)
@@ -563,7 +564,7 @@ async def aprocess_transcript(
             logger.error("Structured extraction failed", extra={"error": str(exc)})
 
     structured = StructuredExtraction.from_raw(_safe_json_parse(structured_raw, {}))
-    all_participants = list(dict.fromkeys(participants + structured.participants))
+    all_participants = merge_participant_names(participants + structured.participants)
     _emit(progress_callback, Progress("extracting", 1, 1, "Extracted structured data"))
 
     # ── 6. Knowledge graph ───────────────────────────────────────────

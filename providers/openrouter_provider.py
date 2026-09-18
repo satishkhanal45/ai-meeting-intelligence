@@ -30,6 +30,8 @@ OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 DEFAULT_MODEL = "openai/gpt-4o-mini"
 
+#: Not verified against the live API -- no OpenRouter key was configured when
+#: this list was written. See https://openrouter.ai/models for the current set.
 AVAILABLE_MODELS = [
     "openai/gpt-4o-mini",
     "openai/gpt-4o",

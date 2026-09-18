@@ -13,6 +13,7 @@ from utils import (
     detect_participants,
     estimate_tokens,
     generate_id,
+    merge_participant_names,
     read_transcript_file,
     truncate,
 )
@@ -195,3 +196,31 @@ Key Decisions: ship it"""
 
     def test_filter_is_case_insensitive(self):
         assert detect_participants("DATE: today\nNotes: none\nZara: hello") == ["Zara"]
+
+
+class TestMergeParticipantNames:
+    """Speaker labels give first names; extraction gives full names."""
+
+    def test_short_name_merges_into_full_name(self):
+        assert merge_participant_names(["Alice", "Alice Chen"]) == ["Alice Chen"]
+
+    def test_real_transcript_shape_is_deduplicated(self):
+        merged = merge_participant_names(
+            ["Alice", "Bob", "Priya", "Alice Chen", "Bob Martinez", "Priya Sharma"]
+        )
+        assert merged == ["Alice Chen", "Bob Martinez", "Priya Sharma"]
+
+    def test_distinct_people_are_not_merged(self):
+        # Only whole-token prefixes merge, so these remain separate people.
+        assert merge_participant_names(["Alice", "Alicia"]) == ["Alice", "Alicia"]
+        assert merge_participant_names(["Bob", "Bobby"]) == ["Bob", "Bobby"]
+
+    def test_first_appearance_order_is_preserved(self):
+        merged = merge_participant_names(["Zoe", "Adam", "Zoe Smith", "Adam Jones"])
+        assert merged == ["Zoe Smith", "Adam Jones"]
+
+    def test_blanks_and_duplicates_are_dropped(self):
+        assert merge_participant_names(["Alice", "", "  ", "Alice"]) == ["Alice"]
+
+    def test_empty_input(self):
+        assert merge_participant_names([]) == []

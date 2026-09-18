@@ -24,13 +24,24 @@ from .errors import (
     ProviderTimeoutError,
 )
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+# An alias rather than a pinned version. Google retires concrete model ids, and
+# a stale default is a hard 404 on every call: "gemini-2.0-flash" was the
+# default here until it stopped existing. The alias always resolves to the
+# current flash model, and callers who need reproducibility can pin one below.
+DEFAULT_MODEL = "gemini-flash-latest"
 
+#: Verified against the live API. `models.list()` is not a reliable guide --
+#: it advertises models that then 404 on generateContent -- so this list is
+#: checked by calling each one.
 AVAILABLE_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
 ]
 
 
