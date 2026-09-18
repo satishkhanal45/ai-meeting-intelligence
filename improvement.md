@@ -714,14 +714,20 @@ The current setup is dev-only masquerading as deployable:
 tracked files 6,558 → 57; the Docker container now starts and serves `/api/health`.
 See §9 for the full change log.
 
-### Phase 1 — Make it robust (1 week)
-- [ ] Retries + timeouts + typed provider errors + fallback chain (§2.4)
-- [ ] Async providers and concurrent chunk summarisation (§4.1)
-- [ ] Background jobs with real progress via SSE (§4.2)
-- [ ] Structured/schema-constrained output; delete the JSON scraping (§2.5)
-- [ ] Surface partial failures in the UI (§2.3)
-- [ ] FTS5 search + pagination (§3.2, §3.3)
-- [ ] API tests + provider tests + coverage gate (§5.5)
+### Phase 1 — Make it robust ✅ COMPLETE
+- [x] Retries + timeouts + typed provider errors + fallback chain (§2.4)
+- [x] Async providers and concurrent chunk summarisation (§4.1)
+- [x] Background jobs with real progress via SSE (§4.2)
+- [x] Structured/schema-constrained output; delete the JSON scraping (§2.5)
+- [x] Surface partial failures in the UI (§2.3)
+- [x] FTS5 search + pagination (§3.2, §3.3)
+- [x] API tests + provider tests + coverage gate (§5.5)
+- [x] **Bonus:** schema migrations (§3.3), model selection (§2.4),
+      stale model defaults, participant deduplication
+
+**Result:** 118 → **173 tests**, coverage 76% → **81%**. Chunk summarisation is
+~1.6× faster at the default concurrency of 5. Verified end to end against the live
+Gemini API. See §10 for the full change log.
 
 ### Phase 2 — Make it a product (2–3 weeks)
 - [ ] Editable action items / deadlines / decisions (§6 T1-2)
@@ -875,3 +881,92 @@ Completed on 2026-09-18. Every fix has a regression test that fails against the 
 - `GraphData` still re-parses its JSON per access (§1.7).
 - Frontend search still fires per keystroke with no debounce (§1.8).
 - **`data/meetings.db` holds 23 rows of test debris** ("Mock Meeting", "Empty Transcript") from suite runs before the isolation fix. Your 5 real meetings are intact. These are safe to delete but were left in place pending your confirmation.
+
+---
+
+# PART 10 — Phase 1 change log
+
+Completed on 2026-09-18. Verified against the live Gemini API, not only mocks.
+
+## Provider layer
+
+| Change | Why |
+|---|---|
+| `providers/errors.py` — typed hierarchy, each carrying `retryable`, status code and `Retry-After` | Every failure was a bare `RuntimeError`; callers could not tell an expired key from a rate limit |
+| `providers/retry.py` — exponential backoff with full jitter, honouring `Retry-After` | One transient 429 permanently lost a chunk of the transcript |
+| `BaseProvider` restructured as a template (`_generate_raw` / `_agenerate_raw`) | Removed the duplicated `generate`/`generate_json` pair from all three providers |
+| Async support via each SDK's own async client | Required for concurrent summarisation |
+| Timeouts on Gemini and Groq | Neither had one; a hung connection stalled a run indefinitely |
+| `AVAILABLE_MODELS` per provider + `model` on `ProcessRequest` | Models were fixed in constructors and could not be chosen |
+| Gemini default → `gemini-flash-latest` | `gemini-2.0-flash` had been retired and 404'd on every call |
+
+## Pipeline
+
+| Change | Why |
+|---|---|
+| Concurrent chunk summarisation behind a semaphore | Serial loop made wall-clock time linear in transcript length |
+| Recursive merge in batches of 5, batches run concurrently | Merging every summary in one prompt overflows the context window |
+| `chunk_failures` / `degraded` tracked and persisted | A partial run was presented as if it were complete |
+| `PipelineError` when *no* chunk succeeds | A total failure was saved as a hollow meeting and reported as success |
+| Auth failures abort the run | A rejected key walked the whole transcript failing identically; a 62-chunk transcript now stops after the in-flight batch |
+| `LLMClient` with a provider fallback chain | One vendor's outage ended the run |
+| Fallback responses are never written to the summary cache | The key names the *requested* provider, so caching a fallback's output would make a later healthy run replay another vendor's work |
+| Progress callbacks + stage-weighted `overall_fraction` | Nothing real existed to drive a progress bar |
+| `StructuredExtraction` / `KnowledgeGraphPayload` replace JSON scraping | `Model(**item)` raised `TypeError` on one unexpected key and discarded the whole batch |
+| `merge_participant_names` | "Alice" and "Alice Chen" were listed as two people, doubling the participant count |
+
+## Data layer
+
+| Change | Why |
+|---|---|
+| `PRAGMA user_version` migration runner, **append-only** | `CREATE TABLE IF NOT EXISTS` cannot evolve a populated schema |
+| FTS5 index over titles, participants, summaries, transcripts, tasks, decisions, deadlines, BM25-ranked | `LIKE '%term%'` across six tables could not rank and never searched transcripts |
+| Pagination on list and search | Listing was unbounded with two correlated subqueries per row |
+| Index on `created_at` | Both queries sort by it; only `date` was indexed |
+| New columns: `model`, `chunk_total`, `chunk_failures`, `input_tokens`, `output_tokens`, `served_by`, `updated_at` | Nothing recorded how a run actually went |
+
+## API
+
+| Change | Why |
+|---|---|
+| `POST /api/process` → 202 + job id | Inline processing held a connection for minutes; any proxy would cut it |
+| `GET /api/jobs/{id}` and `/events` (SSE) | No way to poll, stream or cancel |
+| `DELETE /api/jobs/{id}` | Cancellation |
+| `GET /api/providers` | Exposes configured state and selectable models |
+| Provider guard checks the registry first, requires a key only for hosted providers | Requiring a key for everything would reject a local or test provider |
+| Progress clamped to its high-water mark | The merge stage revisits a stage across rounds, making the bar jump backwards |
+
+## Frontend
+
+Real SSE-driven progress with polling fallback and cancellation; degraded-run
+warnings in the result pane and a "partial" badge in the history list; provider
+and model pickers; 300 ms search debounce with `AbortController` so a slow
+earlier response cannot overwrite a later one; real error states replacing
+`.catch(console.error)`; delete confirmation.
+
+## Verified
+
+- `pytest` — **173 passed, 3 skipped, 81% coverage**
+- `ruff check .` — clean; `tsc --noEmit` and `npm run build` — clean
+- **Live Gemini run**: sample transcript → 10 action items, 4 decisions,
+  5 deadlines, 24-entity graph, 5 deduplicated participants, 15.8s, not degraded
+- **Live failure paths**: an invalid Groq key produces "The provider rejected the
+  configured API key", not an opaque error; an exhausted quota retries with
+  backoff, then reports a degraded or failed run honestly
+
+## Notes for whoever picks this up
+
+- The **Groq key in `.env` is invalid** (401) and the **Gemini free-tier quota is
+  exhausted** on the larger models. `gemini-flash-lite-latest` still had quota and
+  was used for the successful verification run.
+- Groq and OpenRouter `AVAILABLE_MODELS` are **unverified** — no working key was
+  available. Confirm against each vendor's model list before trusting them.
+- Jobs are in-process. Restarting the API loses running jobs. Moving to Redis and
+  a separate worker is contained: the HTTP surface would not change.
+
+## Still outstanding from Part 1
+
+- `get_connection`'s retry-after-`yield` can still raise `RuntimeError` (§1.5)
+- `nx.Graph` still loses relationship direction (§1.6)
+- `GraphData` still re-parses its JSON per access (§1.7)
+- `app.py`, the parallel Streamlit UI, still exists (§2.2) — Phase 2
