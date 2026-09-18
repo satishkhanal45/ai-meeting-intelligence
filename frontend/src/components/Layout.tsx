@@ -4,6 +4,9 @@ const NAV = [
   { path: '/', label: 'Dashboard', icon: '📊' },
   { path: '/new', label: 'New Meeting', icon: '📝' },
   { path: '/history', label: 'Meeting History', icon: '📚' },
+  { path: '/actions', label: 'Action Items', icon: '📋' },
+  { path: '/deadlines', label: 'Deadlines', icon: '📅' },
+  { path: '/people', label: 'People', icon: '👥' },
   { path: '/graph', label: 'Visualization', icon: '🕸️' },
   { path: '/settings', label: 'Settings', icon: '⚙️' },
 ]
@@ -19,7 +22,7 @@ export default function Layout({ children }: LayoutProps) {
         <h1>🧠 Meeting AI</h1>
         <nav>
           {NAV.map(({ path, label, icon }) => (
-            <NavLink to={path} className={({ isActive }) => isActive ? 'active' : ''} end={path === '/'}>
+            <NavLink key={path} to={path} className={({ isActive }) => isActive ? 'active' : ''} end={path === '/'}>
               <span>{icon}</span>
               <span>{label}</span>
             </NavLink>

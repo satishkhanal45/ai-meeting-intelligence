@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from models import (
+from meeting_intelligence.models import (
     ActionItem,
     Deadline,
     Decision,

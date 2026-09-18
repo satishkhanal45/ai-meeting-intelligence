@@ -1,0 +1,31 @@
+# Version control
+.git/
+.gitignore
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node — the frontend build stage installs its own dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime data and secrets — never bake these into an image
+.env
+data/
+meetings/*.json
+
+# Docs and local tooling
+*.md
+!README.md
+.vscode/
+.idea/

@@ -7,12 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from utils import (
+from meeting_intelligence.utils import (
     chunk_transcript,
     clean_transcript,
     detect_participants,
     estimate_tokens,
     generate_id,
+    merge_participant_names,
     read_transcript_file,
     truncate,
 )
@@ -49,12 +50,22 @@ class TestChunkTranscript:
         chunks = chunk_transcript(sample_cleaned_transcript, mode="token", chunk_size=10, overlap=2)
         assert len(chunks) >= 1
 
-    def test_speaker_mode(self):
+    def test_speaker_mode_splits_on_speaker_turns(self):
+        # A turn is only closed once it reaches half the chunk budget, so the
+        # budget has to be small enough for these turns to trigger a split.
+        text = "\n".join(f"{name}: {'word ' * 40}" for name in ["Alice", "Bob", "Alice"])
+        chunks = chunk_transcript(text, mode="speaker", chunk_size=100)
+        assert len(chunks) >= 2
+
+    def test_speaker_mode_merges_short_turns(self):
+        # Small turns are deliberately merged so the pipeline does not spend an
+        # LLM call per one-line utterance.
         text = """Alice: First turn
 Bob: Second turn
 Alice: Third turn"""
         chunks = chunk_transcript(text, mode="speaker", chunk_size=1000)
-        assert len(chunks) >= 2
+        assert len(chunks) == 1
+        assert "First turn" in chunks[0] and "Third turn" in chunks[0]
 
 
 class TestDetectParticipants:
@@ -126,3 +137,90 @@ class TestReadTranscriptFile:
     def test_nonexistent_file(self):
         with pytest.raises((FileNotFoundError, ValueError)):
             read_transcript_file("/nonexistent/file.txt")
+
+
+class TestChunkBudgetRegressions:
+    """Regressions for the chunk-size arithmetic.
+
+    The tokens-per-word ratio used to be inverted, so a request for 1000-token
+    chunks produced chunks of roughly 1560 estimated tokens.
+    """
+
+    @pytest.mark.parametrize("chunk_size", [200, 500, 1000, 2000])
+    def test_chunks_respect_the_requested_budget(self, chunk_size):
+        text = " ".join(["word"] * 8000)
+        chunks = chunk_transcript(text, mode="token", chunk_size=chunk_size, overlap=0)
+        assert chunks
+        # A 10% tolerance covers the estimator's own imprecision; the old bug
+        # overshot by 56%.
+        assert max(estimate_tokens(c) for c in chunks) <= chunk_size * 1.1
+
+    def test_zero_overlap_is_honoured(self):
+        # ``overlap or default`` silently replaced 0 with the configured
+        # default, making non-overlapping chunks impossible to request.
+        text = " ".join(["word"] * 4000)
+        no_overlap = chunk_transcript(text, mode="token", chunk_size=500, overlap=0)
+        overlapping = chunk_transcript(text, mode="token", chunk_size=500, overlap=250)
+        assert len(overlapping) > len(no_overlap)
+
+    def test_zero_overlap_loses_no_words(self):
+        words = [f"w{i}" for i in range(500)]
+        chunks = chunk_transcript(" ".join(words), mode="token", chunk_size=100, overlap=0)
+        assert " ".join(chunks).split() == words
+
+    def test_larger_overlap_produces_more_chunks(self):
+        text = " ".join(["word"] * 4000)
+        counts = [
+            len(chunk_transcript(text, mode="token", chunk_size=500, overlap=ov))
+            for ov in (0, 100, 250, 400)
+        ]
+        assert counts == sorted(counts)
+
+
+class TestParticipantHeadingFilter:
+    """Section headings share the `Name:` shape and were counted as people."""
+
+    def test_headings_are_not_participants(self):
+        text = """Date: 2026-07-20
+Participants: Alice Chen, Bob Martinez
+Agenda: sprint planning
+Alice: Let's begin.
+Bob: Sounds good.
+Action Items: follow up
+Key Decisions: ship it"""
+        assert detect_participants(text) == ["Alice", "Bob"]
+
+    def test_real_transcript_yields_only_people(self, sample_transcript):
+        participants = detect_participants(clean_transcript(sample_transcript))
+        assert participants == ["Alice", "Bob", "Priya", "Sam", "Diana"]
+
+    def test_filter_is_case_insensitive(self):
+        assert detect_participants("DATE: today\nNotes: none\nZara: hello") == ["Zara"]
+
+
+class TestMergeParticipantNames:
+    """Speaker labels give first names; extraction gives full names."""
+
+    def test_short_name_merges_into_full_name(self):
+        assert merge_participant_names(["Alice", "Alice Chen"]) == ["Alice Chen"]
+
+    def test_real_transcript_shape_is_deduplicated(self):
+        merged = merge_participant_names(
+            ["Alice", "Bob", "Priya", "Alice Chen", "Bob Martinez", "Priya Sharma"]
+        )
+        assert merged == ["Alice Chen", "Bob Martinez", "Priya Sharma"]
+
+    def test_distinct_people_are_not_merged(self):
+        # Only whole-token prefixes merge, so these remain separate people.
+        assert merge_participant_names(["Alice", "Alicia"]) == ["Alice", "Alicia"]
+        assert merge_participant_names(["Bob", "Bobby"]) == ["Bob", "Bobby"]
+
+    def test_first_appearance_order_is_preserved(self):
+        merged = merge_participant_names(["Zoe", "Adam", "Zoe Smith", "Adam Jones"])
+        assert merged == ["Zoe Smith", "Adam Jones"]
+
+    def test_blanks_and_duplicates_are_dropped(self):
+        assert merge_participant_names(["Alice", "", "  ", "Alice"]) == ["Alice"]
+
+    def test_empty_input(self):
+        assert merge_participant_names([]) == []

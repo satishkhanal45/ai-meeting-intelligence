@@ -4,7 +4,7 @@ A production-ready AI-powered meeting intelligence system that understands long 
 
 Built for real-world use — runs entirely locally with only API-based LLM dependencies.
 
-The original Streamlit frontend has been migrated to a **React SPA** powered by a **FastAPI REST backend**. The Streamlit version is still available as an optional fallback (see below).
+The frontend is a **React SPA** powered by a **FastAPI REST backend**.
 
 ## Features
 
@@ -146,7 +146,7 @@ You need **two terminals** — one for the Python API backend and one for the Re
 ### Backend (FastAPI)
 
 ```bash
-uv run uvicorn api.main:app --reload --port 8080
+uv run uvicorn meeting_intelligence.api.main:app --reload --port 8080
 ```
 
 The API runs at `http://localhost:8080` with interactive docs at `http://localhost:8080/docs`.
@@ -160,15 +160,6 @@ npm run dev
 ```
 
 The React app runs at `http://localhost:5173` and proxies `/api` requests to the backend.
-
-### Streamlit (optional fallback)
-
-The original Streamlit UI is still available via:
-
-```bash
-uv sync --extra streamlit
-uv run streamlit run app.py
-```
 
 ## Configuration
 
@@ -209,64 +200,46 @@ The dashboard shows summary metrics: total meetings, unique participants, total 
 ## Project Structure
 
 ```
-meeting-intelligence/
-├── api/                      # FastAPI REST API
-│   ├── __init__.py           # Package init
-│   ├── main.py               # FastAPI app with CORS
-│   ├── routes.py             # API routes (7 endpoints)
-│   └── schemas.py            # Request/response schemas
-├── frontend/                 # React SPA (Vite + TypeScript)
-│   ├── src/
-│   │   ├── api/client.ts     # Typed fetch wrapper
-│   │   ├── types/index.ts    # Shared TypeScript interfaces
-│   │   ├── components/       # Reusable UI components
-│   │   │   ├── Layout.tsx    # Sidebar + main layout
-│   │   │   ├── StatCard.tsx  # Metric display card
-│   │   │   ├── MeetingCard.tsx # Meeting list item
-│   │   │   ├── MeetingTabs.tsx # Detail tabs component
-│   │   │   └── GraphViewer.tsx # 3d-force-graph (Three.js)
-│   │   └── pages/            # Route pages
-│   │       ├── Dashboard.tsx
-│   │       ├── NewMeeting.tsx
-│   │       ├── MeetingHistory.tsx
-│   │       ├── KnowledgeGraph.tsx
-│   │       └── Settings.tsx
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── tsconfig.json
-├── app.py                    # Streamlit UI (optional fallback)
-├── pipeline.py               # Hierarchical summarization pipeline
-├── graph.py                  # Knowledge graph builder
-├── database.py               # SQLite CRUD and full-text search
-├── config.py                 # Environment configuration (pydantic-settings)
-├── logger.py                 # Structured JSON logging (console + file)
-├── prompts.py                # LLM prompt templates (5 prompt factories)
-├── models.py                 # Pydantic data models (12 model classes)
-├── utils.py                  # Cleaning, chunking, caching utilities
-├── providers/                # LLM provider abstraction
-│   ├── __init__.py
-│   ├── base_provider.py
-│   ├── gemini_provider.py
-│   ├── groq_provider.py
-│   └── openrouter_provider.py
-├── data/                     # SQLite database storage (auto-created)
-│   └── logs/                 # Application logs (auto-created)
-├── meetings/                 # Sample transcripts and exports
-│   └── sample_transcript.txt
-├── tests/                    # Pytest test suite
-│   ├── conftest.py
-│   ├── test_models.py
-│   ├── test_utils.py
-│   ├── test_database.py
-│   ├── test_graph.py
-│   └── test_pipeline.py
-├── docker-compose.yml        # Docker orchestration
-├── Dockerfile                # API container image
-├── pyproject.toml            # Project metadata & dependencies
-├── .env.example              # API key template
-├── validate.py               # Project validation script
-└── README.md                 # This file
+ai-meeting-intelligence/
+├── src/meeting_intelligence/     # Installable package
+│   ├── api/                      # FastAPI REST API
+│   │   ├── main.py               # App, CORS, lifespan, static SPA
+│   │   ├── routes.py             # Endpoints
+│   │   └── schemas.py            # Request/response models
+│   ├── providers/                # LLM provider abstraction
+│   │   ├── base_provider.py      # Retry/timeout template
+│   │   ├── errors.py             # Typed provider errors
+│   │   ├── retry.py              # Backoff with jitter
+│   │   ├── gemini_provider.py
+│   │   ├── groq_provider.py
+│   │   └── openrouter_provider.py
+│   ├── pipeline.py               # Concurrent summarisation pipeline
+│   ├── jobs.py                   # Background job registry
+│   ├── database.py               # SQLite, migrations, FTS5
+│   ├── exporters.py              # Markdown / CSV / iCalendar
+│   ├── graph.py                  # Knowledge graph (NetworkX)
+│   ├── models.py                 # Pydantic data models
+│   ├── prompts.py                # LLM prompt templates
+│   ├── config.py                 # Settings (pydantic-settings)
+│   ├── logger.py                 # Structured JSON logging
+│   └── utils.py                  # Cleaning, chunking, caching
+├── frontend/                     # React SPA (Vite + TypeScript)
+│   └── src/
+│       ├── api/client.ts         # Typed fetch wrapper + SSE follower
+│       ├── types/index.ts        # Shared interfaces
+│       ├── components/           # Layout, cards, tabs, graph viewer
+│       └── pages/                # Dashboard, NewMeeting, History,
+│                                 # ActionItems, Deadlines, People,
+│                                 # KnowledgeGraph, Settings
+├── tests/                        # Pytest suite
+├── data/                         # SQLite database + logs (auto-created)
+├── meetings/                     # Sample transcripts
+├── Dockerfile                    # Multi-stage: frontend + API in one image
+├── docker-compose.yml            # Production-style single service
+├── docker-compose.dev.yml        # Dev overlay with hot reload
+├── pyproject.toml                # Metadata, dependencies, tool config
+├── validate.py                   # Project validation script
+└── improvement.md                # Review, roadmap and change log
 ```
 
 ## Database Schema
@@ -414,7 +387,7 @@ Checks:
 
 A realistic sprint planning transcript is included at `meetings/sample_transcript.txt` with 5 participants, 10 action items, 3 decisions, and 5 deadlines. Use it to test the application:
 
-1. Start the backend: `uv run uvicorn api.main:app --reload --port 8080`
+1. Start the backend: `uv run uvicorn meeting_intelligence.api.main:app --reload --port 8080`
 2. Start the frontend: `cd frontend && npm run dev`
 3. Open `http://localhost:5173` and go to **New Meeting**
 4. Upload `meetings/sample_transcript.txt` or paste its contents
