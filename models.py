@@ -9,27 +9,67 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    computed_field,
+    field_validator,
+)
 
 from logger import get_logger
 
 _LOGGER = get_logger(__name__)
 
 
+#: Allowed values, enforced at the database and API boundary. The LLM is asked
+#: for these but returns whatever it likes, so unknown values are normalised
+#: rather than rejected.
+ACTION_ITEM_STATUSES = ("open", "in_progress", "done", "cancelled")
+ACTION_ITEM_PRIORITIES = ("high", "medium", "low")
+DEADLINE_TYPES = ("explicit", "relative", "milestone")
+
+
+def _normalise(value: str, allowed: tuple[str, ...], default: str) -> str:
+    candidate = (value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    return candidate if candidate in allowed else default
+
+
 class ActionItem(BaseModel):
+    #: Database row id. Absent until the item has been persisted; the API needs
+    #: it to address a single item for editing.
+    id: Optional[int] = None
     owner: str = ""
     task: str = ""
     priority: str = "medium"
     status: str = "open"
 
+    @field_validator("priority")
+    @classmethod
+    def _check_priority(cls, value: str) -> str:
+        return _normalise(value, ACTION_ITEM_PRIORITIES, "medium")
+
+    @field_validator("status")
+    @classmethod
+    def _check_status(cls, value: str) -> str:
+        return _normalise(value, ACTION_ITEM_STATUSES, "open")
+
 
 class Deadline(BaseModel):
+    id: Optional[int] = None
     description: str = ""
     date: str = ""
     type: str = "explicit"
 
+    @field_validator("type")
+    @classmethod
+    def _check_type(cls, value: str) -> str:
+        return _normalise(value, DEADLINE_TYPES, "explicit")
+
 
 class Decision(BaseModel):
+    id: Optional[int] = None
     decision: str = ""
     rationale: str = ""
 

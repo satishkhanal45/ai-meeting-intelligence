@@ -356,3 +356,180 @@ class TestPagination:
     def test_invalid_limit_is_rejected(self, client):
         assert client.get("/api/meetings", params={"limit": 0}).status_code == 422
         assert client.get("/api/meetings", params={"limit": 10_000}).status_code == 422
+
+
+class TestEditingExtractedItems:
+    """Extraction output used to be write-once.
+
+    A wrong owner, a hallucinated task or a completed item could not be
+    corrected, which made the extracted data a read-only report rather than
+    something a team could work from.
+    """
+
+    def test_action_item_status_can_be_changed(self, client, seeded_meeting):
+        meeting = client.get(f"/api/meetings/{seeded_meeting}").json()
+        item = meeting["action_items"][0]
+        assert item["status"] == "open"
+
+        response = client.patch(f"/api/items/action-items/{item['id']}", json={"status": "done"})
+        assert response.status_code == 200
+        assert response.json()["action_items"][0]["status"] == "done"
+
+    def test_partial_update_leaves_other_fields_alone(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        original_task = item["task"]
+
+        client.patch(f"/api/items/action-items/{item['id']}", json={"owner": "Reassigned"})
+        updated = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        assert updated["owner"] == "Reassigned"
+        assert updated["task"] == original_task
+
+    def test_invalid_status_is_rejected(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        response = client.patch(
+            f"/api/items/action-items/{item['id']}", json={"status": "somehow"}
+        )
+        assert response.status_code == 422
+
+    def test_items_can_be_added(self, client, seeded_meeting):
+        response = client.post(
+            f"/api/meetings/{seeded_meeting}/action-items",
+            json={"task": "Something extraction missed", "owner": "Dana", "priority": "high"},
+        )
+        assert response.status_code == 201
+        new_id = response.json()["id"]
+
+        tasks = {
+            i["task"] for i in client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"]
+        }
+        assert "Something extraction missed" in tasks
+        assert isinstance(new_id, int)
+
+    def test_hallucinated_items_can_be_deleted(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        assert client.delete(f"/api/items/action-items/{item['id']}").status_code == 204
+        assert client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"] == []
+
+    def test_deleting_twice_is_404(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        client.delete(f"/api/items/action-items/{item['id']}")
+        assert client.delete(f"/api/items/action-items/{item['id']}").status_code == 404
+
+    def test_unknown_item_is_404(self, client):
+        assert client.patch("/api/items/action-items/999999", json={"status": "done"}).status_code == 404
+        assert client.delete("/api/items/action-items/999999").status_code == 404
+
+    def test_unknown_item_type_is_404(self, client, seeded_meeting):
+        assert client.patch("/api/items/sandwiches/1", json={"x": 1}).status_code == 404
+        assert client.post(f"/api/meetings/{seeded_meeting}/sandwiches", json={}).status_code == 404
+
+    def test_adding_to_an_unknown_meeting_is_404(self, client):
+        response = client.post("/api/meetings/nope/action-items", json={"task": "x"})
+        assert response.status_code == 404
+
+    def test_decisions_and_deadlines_are_editable_too(self, client, seeded_meeting):
+        meeting = client.get(f"/api/meetings/{seeded_meeting}").json()
+        decision = meeting["decisions"][0]
+        assert (
+            client.patch(
+                f"/api/items/decisions/{decision['id']}", json={"rationale": "Revised reason"}
+            ).status_code
+            == 200
+        )
+
+        created = client.post(
+            f"/api/meetings/{seeded_meeting}/deadlines",
+            json={"description": "Launch", "date": "2026-10-01", "type": "explicit"},
+        )
+        assert created.status_code == 201
+
+        refreshed = client.get(f"/api/meetings/{seeded_meeting}").json()
+        assert refreshed["decisions"][0]["rationale"] == "Revised reason"
+        assert any(d["description"] == "Launch" for d in refreshed["deadlines"])
+
+    def test_meeting_title_can_be_corrected(self, client, seeded_meeting):
+        response = client.patch(
+            f"/api/meetings/{seeded_meeting}", json={"title": "Corrected Title"}
+        )
+        assert response.status_code == 200
+        assert client.get(f"/api/meetings/{seeded_meeting}").json()["title"] == "Corrected Title"
+
+    def test_empty_title_is_rejected(self, client, seeded_meeting):
+        assert client.patch(f"/api/meetings/{seeded_meeting}", json={"title": ""}).status_code == 422
+
+    def test_edits_are_searchable(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        client.patch(f"/api/items/action-items/{item['id']}", json={"task": "Xylophone audit"})
+
+        found = client.get("/api/meetings", params={"search": "Xylophone"}).json()
+        assert [m["id"] for m in found] == [seeded_meeting]
+
+    def test_editing_bumps_updated_at(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        client.patch(f"/api/items/action-items/{item['id']}", json={"status": "done"})
+        meta = client.patch(
+            f"/api/meetings/{seeded_meeting}", json={"title": "Touched"}
+        ).json()
+        assert meta["updated_at"]
+
+    def test_meeting_id_cannot_be_reassigned(self, client, seeded_meeting):
+        """Only declared columns are writable, so an item cannot be moved."""
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        client.patch(
+            f"/api/items/action-items/{item['id']}",
+            json={"status": "done", "meeting_id": "somewhere-else"},
+        )
+        still_there = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"]
+        assert [i["id"] for i in still_there] == [item["id"]]
+
+
+class TestExportEndpoints:
+    def test_markdown_export_is_a_download(self, client, seeded_meeting):
+        response = client.get(f"/api/meetings/{seeded_meeting}/export", params={"format": "md"})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/markdown")
+        assert "attachment;" in response.headers["content-disposition"]
+        assert response.text.startswith("# ")
+
+    @pytest.mark.parametrize(
+        ("fmt", "media_type"),
+        [("md", "text/markdown"), ("csv", "text/csv"), ("ics", "text/calendar"), ("json", "application/json")],
+    )
+    def test_every_format_is_served(self, client, seeded_meeting, fmt, media_type):
+        response = client.get(f"/api/meetings/{seeded_meeting}/export", params={"format": fmt})
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith(media_type)
+
+    def test_unknown_format_is_rejected(self, client, seeded_meeting):
+        response = client.get(f"/api/meetings/{seeded_meeting}/export", params={"format": "exe"})
+        assert response.status_code == 422
+
+    def test_export_of_unknown_meeting_is_404(self, client):
+        assert client.get("/api/meetings/nope/export").status_code == 404
+
+    def test_action_items_csv_spans_all_meetings(self, client):
+        run_to_completion(client, text="Alice: first meeting content goes here")
+        run_to_completion(client, text="Bob: second meeting content goes here")
+        body = client.get("/api/export/action-items").text
+        rows = body.strip().split("\n")
+        assert rows[0].startswith("meeting_id")
+        assert len(rows) == 3  # header + one action item per meeting
+
+    def test_meetings_index_csv(self, client, seeded_meeting):
+        body = client.get("/api/export/meetings").text
+        assert body.startswith("id,title,date")
+        assert seeded_meeting in body
+
+    def test_deadline_calendar_is_served(self, client, seeded_meeting):
+        response = client.get("/api/export/deadlines.ics")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/calendar")
+        assert response.text.startswith("BEGIN:VCALENDAR")
+
+    def test_export_reflects_edits(self, client, seeded_meeting):
+        item = client.get(f"/api/meetings/{seeded_meeting}").json()["action_items"][0]
+        client.patch(f"/api/items/action-items/{item['id']}", json={"status": "done"})
+        markdown = client.get(
+            f"/api/meetings/{seeded_meeting}/export", params={"format": "md"}
+        ).text
+        assert "- [x]" in markdown

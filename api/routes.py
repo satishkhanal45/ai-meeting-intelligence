@@ -5,13 +5,20 @@ import json
 import traceback
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ValidationError
 
 from api.schemas import (
+    ActionItemPayload,
     ConfigResponse,
+    CreatedItemResponse,
+    DeadlinePayload,
+    DecisionPayload,
     HealthResponse,
     JobResponse,
+    MeetingPayload,
     ProcessAcceptedResponse,
     ProcessRequest,
     ProviderInfo,
@@ -20,12 +27,25 @@ from api.schemas import (
 )
 from config import settings
 from database import (
+    create_child,
+    delete_child,
     delete_meeting,
     get_all_participants,
+    get_child_meeting_id,
     get_full_meeting,
     get_meeting_count,
     get_meeting_list,
+    get_meeting_metadata,
     search_meetings,
+    update_child,
+    update_meeting_fields,
+)
+from exporters import (
+    action_items_to_csv,
+    deadlines_to_ics,
+    export_filename,
+    meetings_to_csv,
+    to_markdown,
 )
 from jobs import JobStatus, registry
 from logger import get_logger
@@ -177,6 +197,161 @@ def get_meeting_graph(meeting_id: str):
         "entities": graph_data.get("entities") or [],
         "relationships": graph_data.get("relationships") or [],
     }
+
+
+# ── Editing extracted items ─────────────────────────────────────────────
+#
+# Extraction output used to be write-once, so a wrong owner or a hallucinated
+# task was permanent and an item could never be ticked off.
+
+#: URL segment -> (table, payload model). The segment is hyphenated for the
+#: URL; the table name is not.
+_EDITABLE_KINDS: dict[str, tuple[str, type[BaseModel]]] = {
+    "action-items": ("action_items", ActionItemPayload),
+    "deadlines": ("deadlines", DeadlinePayload),
+    "decisions": ("decisions", DecisionPayload),
+}
+
+
+def _resolve_kind(kind: str) -> tuple[str, type[BaseModel]]:
+    entry = _EDITABLE_KINDS.get(kind)
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown item type '{kind}'. Expected one of {sorted(_EDITABLE_KINDS)}",
+        )
+    return entry
+
+
+async def _read_payload(request: Request, model: type[BaseModel]) -> BaseModel:
+    """Parse and validate a request body for a dynamically chosen model.
+
+    These handlers read the body themselves because the payload type depends
+    on a path parameter, which means FastAPI's own validation -- and its 422
+    response -- does not apply. Without this, a bad value surfaced as a 500.
+    """
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Request body must be valid JSON") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object")
+    try:
+        return model.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors())) from exc
+
+
+@router.patch("/meetings/{meeting_id}")
+def patch_meeting(meeting_id: str, payload: MeetingPayload):
+    """Edit the meeting's own fields, currently just the title."""
+    if not update_meeting_fields(meeting_id, title=payload.title):
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    return get_meeting_metadata(meeting_id)
+
+
+@router.post("/meetings/{meeting_id}/{kind}", response_model=CreatedItemResponse, status_code=201)
+async def create_item(meeting_id: str, kind: str, request: Request):
+    """Add an action item, deadline or decision the extraction step missed."""
+    table, model = _resolve_kind(kind)
+    payload = await _read_payload(request, model)
+
+    fields = payload.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=422, detail="At least one field is required")
+
+    item_id = create_child(table, meeting_id, fields)
+    if item_id is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    return CreatedItemResponse(id=item_id)
+
+
+# Namespaced under /items/ deliberately. A bare "/{kind}/{item_id}" matches the
+# shape of /jobs/{job_id} and, being registered first, swallows it: FastAPI
+# returns 422 for the failed int conversion rather than falling through.
+@router.patch("/items/{kind}/{item_id}")
+async def patch_item(kind: str, item_id: int, request: Request):
+    """Apply a partial update to one extracted item."""
+    table, model = _resolve_kind(kind)
+    payload = await _read_payload(request, model)
+
+    fields = payload.model_dump(exclude_none=True)
+    if not update_child(table, item_id, fields):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+    meeting_id = get_child_meeting_id(table, item_id)
+    return get_full_meeting(meeting_id) if meeting_id else {"ok": True}
+
+
+@router.delete("/items/{kind}/{item_id}", status_code=204)
+def delete_item(kind: str, item_id: int):
+    """Remove one extracted item, such as a hallucinated action."""
+    table, _ = _resolve_kind(kind)
+    if not delete_child(table, item_id):
+        raise HTTPException(status_code=404, detail="Item not found")
+
+
+# ── Export ──────────────────────────────────────────────────────────────
+
+
+_EXPORT_MEDIA_TYPES = {
+    "md": "text/markdown; charset=utf-8",
+    "csv": "text/csv; charset=utf-8",
+    "ics": "text/calendar; charset=utf-8",
+    "json": "application/json",
+}
+
+
+def _attachment(content: str, filename: str, extension: str) -> Response:
+    return Response(
+        content=content,
+        media_type=_EXPORT_MEDIA_TYPES[extension],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/meetings/{meeting_id}/export")
+def export_meeting(meeting_id: str, format: str = Query(default="md", pattern="^(md|csv|ics|json)$")):
+    """Download one meeting as Markdown, CSV, iCalendar or JSON.
+
+    A meeting's value is mostly in what happens afterwards, which means getting
+    the summary and actions out of here and into an email, tracker or calendar.
+    """
+    meeting = get_full_meeting(meeting_id)
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    filename = export_filename(meeting, format)
+    if format == "md":
+        return _attachment(to_markdown(meeting), filename, "md")
+    if format == "csv":
+        return _attachment(action_items_to_csv([meeting]), filename, "csv")
+    if format == "ics":
+        return _attachment(deadlines_to_ics([meeting], meeting.title), filename, "ics")
+    return _attachment(meeting.model_dump_json(indent=2), filename, "json")
+
+
+@router.get("/export/action-items")
+def export_all_action_items(search: str = ""):
+    """Every action item across every meeting, as one CSV."""
+    listing = search_meetings(search, limit=100_000) if search.strip() else get_meeting_list(limit=100_000)
+    meetings = [m for m in (get_full_meeting(item.id) for item in listing) if m is not None]
+    return _attachment(action_items_to_csv(meetings), "action-items.csv", "csv")
+
+
+@router.get("/export/meetings")
+def export_meeting_index(search: str = ""):
+    """One row per meeting, for reporting."""
+    listing = search_meetings(search, limit=100_000) if search.strip() else get_meeting_list(limit=100_000)
+    return _attachment(meetings_to_csv(listing), "meetings.csv", "csv")
+
+
+@router.get("/export/deadlines.ics")
+def export_all_deadlines():
+    """All dated deadlines as a calendar feed that can be subscribed to."""
+    listing = get_meeting_list(limit=100_000)
+    meetings = [m for m in (get_full_meeting(item.id) for item in listing) if m is not None]
+    return _attachment(deadlines_to_ics(meetings), "deadlines.ics", "ics")
 
 
 # ── Processing ──────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from config import DB_PATH
 from logger import get_logger
@@ -381,15 +381,18 @@ def get_full_meeting(meeting_id: str) -> Optional[Meeting]:
             "SELECT executive_summary FROM summaries WHERE meeting_id = ?", (meeting_id,)
         ).fetchone()
         a_rows = conn.execute(
-            "SELECT owner, task, priority, status FROM action_items WHERE meeting_id = ?",
+            "SELECT id, owner, task, priority, status FROM action_items "
+            "WHERE meeting_id = ? ORDER BY id",
             (meeting_id,),
         ).fetchall()
         d_rows = conn.execute(
-            "SELECT description, date, type FROM deadlines WHERE meeting_id = ?",
+            "SELECT id, description, date, type FROM deadlines "
+            "WHERE meeting_id = ? ORDER BY id",
             (meeting_id,),
         ).fetchall()
         dec_rows = conn.execute(
-            "SELECT decision, rationale FROM decisions WHERE meeting_id = ?",
+            "SELECT id, decision, rationale FROM decisions "
+            "WHERE meeting_id = ? ORDER BY id",
             (meeting_id,),
         ).fetchall()
         g_row = conn.execute(
@@ -605,3 +608,126 @@ def get_all_participants() -> list[str]:
         for name in json.loads(row["participants"]):
             seen.add(name)
     return sorted(seen)
+
+
+# ── Editing extracted items ─────────────────────────────────────────────
+#
+# Extraction output was previously write-once: a wrong owner, a hallucinated
+# task or a completed item could not be corrected, which made the data a
+# read-only report rather than something a team could work from.
+
+#: Maps the editable child tables onto their columns and model.
+_CHILD_TABLES: dict[str, tuple[str, ...]] = {
+    "action_items": ("owner", "task", "priority", "status"),
+    "deadlines": ("description", "date", "type"),
+    "decisions": ("decision", "rationale"),
+}
+
+
+def _require_table(table: str) -> tuple[str, ...]:
+    columns = _CHILD_TABLES.get(table)
+    if columns is None:
+        raise ValueError(f"Unknown table '{table}'. Expected one of {sorted(_CHILD_TABLES)}")
+    return columns
+
+
+def get_child_meeting_id(table: str, item_id: int) -> Optional[str]:
+    """Return the meeting a child row belongs to, or ``None`` if absent."""
+    _require_table(table)
+    with get_connection() as conn:
+        row = conn.execute(
+            f"SELECT meeting_id FROM {table} WHERE id = ?", (item_id,)
+        ).fetchone()
+    return row["meeting_id"] if row else None
+
+
+def update_child(table: str, item_id: int, fields: dict[str, Any]) -> bool:
+    """Apply a partial update to one child row.
+
+    Only the columns declared for *table* are writable, so a caller cannot
+    reassign ``meeting_id`` or ``id``. Returns ``False`` if the row is gone.
+    """
+    columns = _require_table(table)
+    updates = {k: v for k, v in fields.items() if k in columns and v is not None}
+    if not updates:
+        return get_child_meeting_id(table, item_id) is not None
+
+    assignments = ", ".join(f"{column} = ?" for column in updates)
+    with get_transaction() as conn:
+        cursor = conn.execute(
+            f"UPDATE {table} SET {assignments} WHERE id = ?",
+            (*updates.values(), item_id),
+        )
+        if cursor.rowcount == 0:
+            return False
+        row = conn.execute(
+            f"SELECT meeting_id FROM {table} WHERE id = ?", (item_id,)
+        ).fetchone()
+        if row:
+            _touch_meeting(conn, row["meeting_id"])
+    logger.info(
+        "Child row updated",
+        extra={"table": table, "item_id": item_id, "fields": sorted(updates)},
+    )
+    return True
+
+
+def create_child(table: str, meeting_id: str, fields: dict[str, Any]) -> Optional[int]:
+    """Insert one child row against an existing meeting; return its new id."""
+    columns = _require_table(table)
+    values = {column: fields.get(column) for column in columns}
+    values = {k: ("" if v is None else v) for k, v in values.items()}
+
+    with get_transaction() as conn:
+        exists = conn.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)).fetchone()
+        if exists is None:
+            return None
+        placeholders = ", ".join("?" for _ in values)
+        cursor = conn.execute(
+            f"INSERT INTO {table} (meeting_id, {', '.join(values)}) "
+            f"VALUES (?, {placeholders})",
+            (meeting_id, *values.values()),
+        )
+        item_id = cursor.lastrowid
+        _touch_meeting(conn, meeting_id)
+    logger.info("Child row created", extra={"table": table, "item_id": item_id})
+    return item_id
+
+
+def delete_child(table: str, item_id: int) -> bool:
+    """Remove one child row. Returns ``False`` if it was already gone."""
+    _require_table(table)
+    with get_transaction() as conn:
+        row = conn.execute(
+            f"SELECT meeting_id FROM {table} WHERE id = ?", (item_id,)
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
+        _touch_meeting(conn, row["meeting_id"])
+    logger.info("Child row deleted", extra={"table": table, "item_id": item_id})
+    return True
+
+
+def _touch_meeting(conn: sqlite3.Connection, meeting_id: str) -> None:
+    """Bump ``updated_at`` and refresh the search index after an edit."""
+    conn.execute(
+        "UPDATE meetings SET updated_at = ? WHERE id = ?",
+        (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S"), meeting_id),
+    )
+    _index_meeting(conn, meeting_id)
+
+
+def update_meeting_fields(meeting_id: str, title: Optional[str] = None) -> bool:
+    """Edit a meeting's own editable fields. The title is often mis-inferred."""
+    if title is None:
+        return get_meeting_metadata(meeting_id) is not None
+    with get_transaction() as conn:
+        cursor = conn.execute(
+            "UPDATE meetings SET title = ? WHERE id = ?", (title.strip(), meeting_id)
+        )
+        if cursor.rowcount == 0:
+            return False
+        _touch_meeting(conn, meeting_id)
+    logger.info("Meeting updated", extra={"meeting_id": meeting_id})
+    return True

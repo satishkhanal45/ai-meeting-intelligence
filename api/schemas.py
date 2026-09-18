@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 # A transcript far larger than this is almost certainly a mistake, and the whole
@@ -77,3 +79,36 @@ class ProvidersResponse(BaseModel):
     providers: list[ProviderInfo]
     default_provider: str
     fallback_chain: list[str]
+
+
+# ── Editing extracted items ─────────────────────────────────────────────
+
+
+class ActionItemPayload(BaseModel):
+    """Partial update for an action item. Omitted fields are left alone."""
+
+    owner: str | None = Field(default=None, max_length=200)
+    task: str | None = Field(default=None, max_length=2000)
+    priority: Literal["high", "medium", "low"] | None = None
+    status: Literal["open", "in_progress", "done", "cancelled"] | None = None
+
+
+class DeadlinePayload(BaseModel):
+    description: str | None = Field(default=None, max_length=2000)
+    date: str | None = Field(default=None, max_length=100)
+    type: Literal["explicit", "relative", "milestone"] | None = None
+
+
+class DecisionPayload(BaseModel):
+    decision: str | None = Field(default=None, max_length=2000)
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class MeetingPayload(BaseModel):
+    """Editable fields on the meeting itself. Titles are often mis-inferred."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class CreatedItemResponse(BaseModel):
+    id: int
