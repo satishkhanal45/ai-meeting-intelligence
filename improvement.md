@@ -1068,12 +1068,33 @@ reload overlay, which is what the old compose file actually was.
 proxy actually runs — the previous `VITE_API_URL` was set as a runtime container
 variable that the browser, not the container, would have had to resolve.
 
+## Date grounding (§2.6)
+
+Not a listed Phase 2 item, but the calendar export was half-useless without it:
+**18 of the 33 deadlines** in the archive were free text — "Thursday", "Next
+Friday", "End of week" — because the extraction prompt asked for "YYYY-MM-DD or
+relative text" and never told the model what day it was.
+
+The prompt now demands an absolute date and anchors the calculation on the date
+the transcript itself states, falling back to the processing date only when the
+transcript gives none. That ordering matters: a recording processed months later
+must not have its deadlines pulled forward to the upload date.
+
+Re-running the sample transcript live: **5 of 5 deadlines dated**, correctly
+anchored to the meeting's own Monday, so "Thursday" resolves to 2026-07-24
+rather than the Thursday of the week it was processed.
+
+Existing meetings keep their old free-text dates; only re-processing re-extracts.
+
 ## Verified
 
-- `pytest` — **257 passed**
+- `pytest` — **270 passed, 85% coverage**
 - `ruff check .` — clean; `tsc --noEmit` and `npm run build` — clean
 - `validate.py` — all five checks pass against the new layout
 - Migrating the live database found **19 people across 5 meetings**
+- **Container smoke test**: one image serves `/api/health` and the SPA, deep
+  links like `/people` resolve through history routing, assets are served,
+  the process runs as uid 10001 and the healthcheck reports `healthy`
 
 ## Still outstanding from Part 1
 

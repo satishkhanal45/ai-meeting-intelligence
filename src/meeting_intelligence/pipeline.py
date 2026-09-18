@@ -553,10 +553,11 @@ async def aprocess_transcript(
     )
 
     # ── 5. Extract structured data ───────────────────────────────────
+    meeting_date = _utc_now()
     _emit(progress_callback, Progress("extracting", 0, 1, "Extracting action items"))
     structured_raw = ""
     if valid:
-        system, prompt = extract_structured(merged_summary)
+        system, prompt = extract_structured(merged_summary, meeting_date)
         try:
             response, _ = await client.agenerate(prompt, system, json_mode=True)
             structured_raw = response.content
