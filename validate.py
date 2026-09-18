@@ -29,7 +29,6 @@ REQUIRED_MODULES = [
 ]
 
 REQUIRED_FILES = [
-    "app.py",
     "config.py",
     "logger.py",
     "models.py",
@@ -179,7 +178,7 @@ def main() -> int:
         return 1
     else:
         print("  ✓ VALIDATION PASSED — All checks OK")
-        print("\n  Run:  uv run streamlit run app.py")
+        print("\n  Run:  uv run uvicorn api.main:app --reload --port 8080")
         return 0
 
 

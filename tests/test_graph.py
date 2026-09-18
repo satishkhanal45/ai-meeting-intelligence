@@ -2,25 +2,10 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 
-import pytest
-
-from graph import (
-    build_agraph_config,
-    build_agraph_nodes_edges,
-    build_graph,
-    graph_statistics,
-)
+from graph import build_graph, graph_statistics
 from models import GraphData
-
-# The agraph helpers are only used by the optional Streamlit frontend, which is
-# installed via the ``streamlit`` extra. Skip rather than fail when it is absent.
-requires_agraph = pytest.mark.skipif(
-    importlib.util.find_spec("streamlit_agraph") is None,
-    reason="streamlit-agraph not installed (optional 'streamlit' extra)",
-)
 
 
 class TestBuildGraph:
@@ -76,38 +61,3 @@ class TestGraphStatistics:
         assert "person" in stats["type_breakdown"]
         assert "task" in stats["type_breakdown"]
         assert stats["type_breakdown"]["person"] >= 2
-
-
-class TestBuildAgraph:
-    def test_empty_data(self):
-        nodes, edges = build_agraph_nodes_edges(GraphData())
-        assert nodes == []
-        assert edges == []
-
-    @requires_agraph
-    def test_with_data(self, sample_graph_data):
-        nodes, edges = build_agraph_nodes_edges(sample_graph_data)
-        assert len(nodes) >= 4
-        assert len(edges) >= 3
-        node_ids = {n.id for n in nodes}
-        assert "person-alice" in node_ids
-
-    @requires_agraph
-    def test_node_colors(self, sample_graph_data):
-        nodes, _ = build_agraph_nodes_edges(sample_graph_data)
-        person_node = next(n for n in nodes if n.id == "person-alice")
-        assert person_node.color == "#4A90D9"
-        task_node = next(n for n in nodes if n.id == "task-review")
-        assert task_node.color == "#27AE60"
-        deadline_node = next(n for n in nodes if n.id == "deadline-thu")
-        assert deadline_node.color == "#F1C40F"
-
-
-class TestBuildConfig:
-    @requires_agraph
-    def test_config_returned(self):
-        config = build_agraph_config()
-        assert config is not None
-        assert hasattr(config, "width")
-        assert hasattr(config, "height")
-        assert config.directed is True

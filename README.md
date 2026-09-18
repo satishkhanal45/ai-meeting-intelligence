@@ -4,7 +4,7 @@ A production-ready AI-powered meeting intelligence system that understands long 
 
 Built for real-world use — runs entirely locally with only API-based LLM dependencies.
 
-The original Streamlit frontend has been migrated to a **React SPA** powered by a **FastAPI REST backend**. The Streamlit version is still available as an optional fallback (see below).
+The frontend is a **React SPA** powered by a **FastAPI REST backend**.
 
 ## Features
 
@@ -161,15 +161,6 @@ npm run dev
 
 The React app runs at `http://localhost:5173` and proxies `/api` requests to the backend.
 
-### Streamlit (optional fallback)
-
-The original Streamlit UI is still available via:
-
-```bash
-uv sync --extra streamlit
-uv run streamlit run app.py
-```
-
 ## Configuration
 
 All configuration is managed via `.env` file:
@@ -235,7 +226,6 @@ meeting-intelligence/
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── tsconfig.json
-├── app.py                    # Streamlit UI (optional fallback)
 ├── pipeline.py               # Hierarchical summarization pipeline
 ├── graph.py                  # Knowledge graph builder
 ├── database.py               # SQLite CRUD and full-text search
