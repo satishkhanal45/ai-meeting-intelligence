@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-import utils
-from models import ProviderResponse
-from pipeline import (
+from meeting_intelligence import utils
+from meeting_intelligence.models import ProviderResponse
+from meeting_intelligence.pipeline import (
     PROVIDER_REGISTRY,
     PipelineError,
     _chunk_cache_key,
@@ -20,8 +20,8 @@ from pipeline import (
     process_transcript,
     register_provider,
 )
-from providers.errors import ProviderAuthError, ProviderServerError
-from utils import cache_chunk_summary, clear_chunk_cache, get_cached_chunk_summary
+from meeting_intelligence.providers.errors import ProviderAuthError, ProviderServerError
+from meeting_intelligence.utils import cache_chunk_summary, clear_chunk_cache, get_cached_chunk_summary
 
 
 class MockProvider:
@@ -68,9 +68,9 @@ def _temp_db(monkeypatch, tmp_path):
     ``process_transcript`` persists every meeting it builds, so without this the
     suite writes test fixtures into real application data.
     """
-    import database
+    from meeting_intelligence import database
 
-    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "pipeline_test.db"))
+    monkeypatch.setattr("meeting_intelligence.database.DB_PATH", str(tmp_path / "pipeline_test.db"))
     database.init_db()
 
 
@@ -188,7 +188,7 @@ class TestChunkCacheKey:
 
     def test_prompt_version_is_part_of_the_key(self):
         key = _chunk_cache_key("some text", "groq", "llama", 0.3)
-        with patch("pipeline.PROMPT_VERSION", "different-version"):
+        with patch("meeting_intelligence.pipeline.PROMPT_VERSION", "different-version"):
             assert _chunk_cache_key("some text", "groq", "llama", 0.3) != key
 
     def test_identical_context_hits_the_cache(self):

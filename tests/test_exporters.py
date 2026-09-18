@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from exporters import (
+from meeting_intelligence.exporters import (
     action_items_to_csv,
     deadlines_to_ics,
     export_filename,
@@ -16,7 +16,7 @@ from exporters import (
     parse_deadline_date,
     to_markdown,
 )
-from models import ActionItem, Deadline, Decision, Meeting, MeetingListItem, Summary
+from meeting_intelligence.models import ActionItem, Deadline, Decision, Meeting, MeetingListItem, Summary
 
 
 @pytest.fixture
@@ -158,7 +158,7 @@ class TestIcs:
         An earlier byte-based implementation could split a character across
         the fold, and could fail to advance at all -- an infinite loop.
         """
-        from exporters import _fold_ics
+        from meeting_intelligence.exporters import _fold_ics
 
         original = "SUMMARY:" + filler * 200
         folded = _fold_ics(original)

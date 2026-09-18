@@ -9,8 +9,8 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types as genai_types
 
-from config import settings
-from models import ProviderResponse
+from meeting_intelligence.config import settings
+from meeting_intelligence.models import ProviderResponse
 
 from .base_provider import BaseProvider
 from .errors import (

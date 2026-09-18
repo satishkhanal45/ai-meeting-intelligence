@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from utils import (
+from meeting_intelligence.utils import (
     chunk_transcript,
     clean_transcript,
     detect_participants,

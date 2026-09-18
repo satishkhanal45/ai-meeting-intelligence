@@ -9,20 +9,20 @@ from __future__ import annotations
 
 import pytest
 
-import database
-from database import (
+from meeting_intelligence import database
+from meeting_intelligence.database import (
     get_person,
     insert_meeting,
     list_action_items,
     list_deadlines,
     list_people,
 )
-from models import ActionItem, Deadline, Meeting
+from meeting_intelligence.models import ActionItem, Deadline, Meeting
 
 
 @pytest.fixture(autouse=True)
 def _temp_db(monkeypatch, tmp_path):
-    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "people.db"))
+    monkeypatch.setattr("meeting_intelligence.database.DB_PATH", str(tmp_path / "people.db"))
     database.init_db()
 
 

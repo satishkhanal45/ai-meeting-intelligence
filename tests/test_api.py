@@ -12,8 +12,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from models import ProviderResponse
-from providers.errors import ProviderServerError
+from meeting_intelligence.models import ProviderResponse
+from meeting_intelligence.providers.errors import ProviderServerError
 
 
 class _MockProvider:
@@ -60,14 +60,14 @@ class _MockProvider:
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    import database
-    from pipeline import PROVIDER_REGISTRY, register_provider
+    from meeting_intelligence import database
+    from meeting_intelligence.pipeline import PROVIDER_REGISTRY, register_provider
 
-    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "api_test.db"))
+    monkeypatch.setattr("meeting_intelligence.database.DB_PATH", str(tmp_path / "api_test.db"))
     database.init_db()
     register_provider("mock", _MockProvider)
 
-    from api.main import app
+    from meeting_intelligence.api.main import app
 
     with TestClient(app) as c:
         yield c
@@ -165,7 +165,7 @@ class TestMeetings:
     def test_graph_endpoint_always_returns_the_expected_shape(self, client, seeded_meeting):
         # Even if the stored JSON is valid but not graph-shaped, the endpoint
         # must not hand the frontend a document without these two keys.
-        import database
+        from meeting_intelligence import database
 
         meeting = database.get_full_meeting(seeded_meeting)
         meeting.graph_data.graph_json = json.dumps({"unexpected": "payload"})
@@ -211,7 +211,7 @@ class TestProcessValidation:
         assert response.status_code == 422
 
     def test_oversized_transcript_is_rejected(self, client):
-        from api.schemas import MAX_TRANSCRIPT_CHARS
+        from meeting_intelligence.api.schemas import MAX_TRANSCRIPT_CHARS
 
         response = client.post("/api/process", json={"text": "x" * (MAX_TRANSCRIPT_CHARS + 1)})
         assert response.status_code == 422
@@ -224,7 +224,7 @@ class TestErrorDisclosure:
         async def boom(*args, **kwargs):
             raise RuntimeError("secret detail: /home/user/.env GEMINI_API_KEY=sk-abc123")
 
-        monkeypatch.setattr("api.routes.aprocess_transcript", boom)
+        monkeypatch.setattr("meeting_intelligence.api.routes.aprocess_transcript", boom)
         job = run_to_completion(client)
 
         assert job["status"] == "failed"
@@ -239,7 +239,7 @@ class TestErrorDisclosure:
                 "upstream said: api_key=sk-secret-value", provider="mock"
             )
 
-        monkeypatch.setattr("api.routes.aprocess_transcript", boom)
+        monkeypatch.setattr("meeting_intelligence.api.routes.aprocess_transcript", boom)
         job = run_to_completion(client)
 
         assert job["status"] == "failed"
@@ -328,7 +328,7 @@ class TestProcessGuards:
         assert "Unknown provider" in response.json()["detail"]
 
     def test_unconfigured_builtin_provider_is_rejected(self, client, monkeypatch):
-        from config import Settings
+        from meeting_intelligence.config import Settings
 
         # Patch the class, not the instance: pydantic-settings rejects
         # attributes that are not declared fields.

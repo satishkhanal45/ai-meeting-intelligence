@@ -729,13 +729,16 @@ See §9 for the full change log.
 ~1.6× faster at the default concurrency of 5. Verified end to end against the live
 Gemini API. See §10 for the full change log.
 
-### Phase 2 — Make it a product (2–3 weeks)
-- [ ] Editable action items / deadlines / decisions (§6 T1-2)
-- [ ] Export: Markdown, PDF, CSV, ICS (§6 T1-1)
-- [ ] People table + person pages (§3.1, §6 T2-14)
-- [ ] Action-item workspace and deadline timeline (§6 T2-15, T2-16)
-- [ ] Retire the Streamlit app; single React frontend (§2.2)
-- [ ] Repackage into `src/meeting_intelligence/`; multi-stage Docker (§2.1, §5.4)
+### Phase 2 — Make it a product ✅ COMPLETE
+- [x] Editable action items / deadlines / decisions (§6 T1-2)
+- [x] Export: Markdown, CSV, ICS (§6 T1-1) — PDF deferred, see below
+- [x] People table + person pages (§3.1, §6 T2-14)
+- [x] Action-item workspace and deadline timeline (§6 T2-15, T2-16)
+- [x] Retire the Streamlit app; single React frontend (§2.2)
+- [x] Repackage into `src/meeting_intelligence/`; multi-stage Docker (§2.1, §5.4)
+
+**Result:** 173 → **257 tests**. Three new pages, nine new endpoints, one
+container that serves both API and SPA. See §11 for the full change log.
 
 ### Phase 3 — Differentiate (1–2 months)
 - [ ] Audio upload + Whisper transcription + diarisation (§6 T2-11)
@@ -970,3 +973,111 @@ earlier response cannot overwrite a later one; real error states replacing
 - `nx.Graph` still loses relationship direction (§1.6)
 - `GraphData` still re-parses its JSON per access (§1.7)
 - `app.py`, the parallel Streamlit UI, still exists (§2.2) — Phase 2
+
+---
+
+# PART 11 — Phase 2 change log
+
+Completed on 2026-09-18.
+
+## Editing what the model extracted
+
+Extraction output was write-once. A wrong owner, a hallucinated task or a
+finished item could not be corrected, which made the extracted data a report to
+read rather than something a team could work from.
+
+| Endpoint | Purpose |
+|---|---|
+| `PATCH /api/meetings/{id}` | Correct a mis-inferred title |
+| `POST /api/meetings/{id}/{kind}` | Add what extraction missed |
+| `PATCH /api/items/{kind}/{item_id}` | Partial update |
+| `DELETE /api/items/{kind}/{item_id}` | Remove a hallucinated item |
+
+`kind` is `action-items`, `deadlines` or `decisions`. Only columns declared for
+a table are writable, so a caller cannot reassign `meeting_id` or `id`. Every
+edit bumps `updated_at` and reindexes FTS, so corrections are searchable at once.
+
+The routes are namespaced under `/items/` because a bare `/{kind}/{item_id}`
+matches the shape of `/jobs/{job_id}` and, registered first, swallowed it —
+FastAPI returned 422 for the failed `int` conversion rather than falling
+through. These handlers also parse their own body, since the payload type
+depends on a path parameter, which means FastAPI's automatic 422 does not apply;
+without explicit handling a bad value surfaced as a 500.
+
+## Export
+
+`exporters.py` produces Markdown, CSV and iCalendar. Endpoints cover one meeting
+(`?format=md|csv|ics|json`), all action items as CSV, a meeting index, and a
+subscribable deadline calendar.
+
+Deadlines whose date cannot be parsed ("next Thursday") are omitted from the
+calendar rather than guessed at — an event on the wrong day is worse than none.
+The ICS line folder is character-based: a byte-based version could split a
+multi-byte character across a fold and could fail to advance at all. The
+multibyte test hung until it was rewritten, and folding is now verified
+reversible for ASCII, accented Latin, CJK and emoji.
+
+**PDF was deferred.** Every route to it adds a heavy dependency (a headless
+browser, wkhtmltopdf, or ReportLab plus layout code) for a format the Markdown
+export already covers via any converter. Worth revisiting only if someone needs
+a branded, print-ready artifact.
+
+## People and cross-meeting views
+
+`meetings.participants` was a JSON array in a TEXT column, so "every meeting
+Alice attended" meant deserialising the blob on every row. New `people` and
+`meeting_participants` tables are a queryable projection of it — the blob stays
+authoritative, because it is what the pipeline produced. The projection syncs on
+write, backfills at startup for older databases, and prunes people whose last
+meeting link goes.
+
+New endpoints: `/api/people`, `/api/people/{id}`, `/api/action-items`
+(filterable by status and owner), `/api/deadlines`.
+
+New pages: an action board grouped by status with optimistic updates, a deadline
+timeline separating overdue from upcoming, and person pages. Each links back to
+the meeting an item came from.
+
+**Known limit:** items are matched to people by owner name, since there is no
+foreign key from an item to a person. A rename in one meeting will not follow
+that person's items in another. Real entity resolution is Phase 3.
+
+## Retiring Streamlit
+
+`app.py` was 640 lines reimplementing every page the React app already had,
+against the same internal functions. Removed, along with the `build_agraph_*`
+helpers that only served it, the `streamlit` extra, and the tests that skipped
+whenever `streamlit-agraph` was absent. About 700 lines and one dependency gone.
+Coverage no longer omits 341 unmeasurable statements.
+
+## Packaging and containers
+
+Code moved from eleven root-level modules to `src/meeting_intelligence/`, with
+imports rewritten to be package-absolute. `pip install -e .` now installs the
+application rather than only its dependencies, and `validate.py` no longer needs
+to patch `sys.path`.
+
+The Dockerfile is three stages: build the SPA with Node, install Python
+dependencies, then assemble a slim runtime that copies both. The API serves the
+built SPA from the same origin, so there is one port and no CORS in production.
+The container runs as a non-root user and has a healthcheck. `docker-compose.yml`
+is now a single production-style service; `docker-compose.dev.yml` is the hot
+reload overlay, which is what the old compose file actually was.
+
+`vite.config.ts` reads `VITE_API_TARGET` at config time, which is where the
+proxy actually runs — the previous `VITE_API_URL` was set as a runtime container
+variable that the browser, not the container, would have had to resolve.
+
+## Verified
+
+- `pytest` — **257 passed**
+- `ruff check .` — clean; `tsc --noEmit` and `npm run build` — clean
+- `validate.py` — all five checks pass against the new layout
+- Migrating the live database found **19 people across 5 meetings**
+
+## Still outstanding from Part 1
+
+- `get_connection`'s retry-after-`yield` can still raise `RuntimeError` (§1.5)
+- `nx.Graph` still loses relationship direction (§1.6)
+- `GraphData` still re-parses its JSON per access (§1.7)
+- No authentication (§5.1) — the largest remaining gap before any deployment

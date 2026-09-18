@@ -21,9 +21,9 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Optional
 
-from logger import get_logger
-from pipeline import Progress, overall_fraction
-from utils import generate_id
+from meeting_intelligence.logger import get_logger
+from meeting_intelligence.pipeline import Progress, overall_fraction
+from meeting_intelligence.utils import generate_id
 
 logger = get_logger(__name__)
 

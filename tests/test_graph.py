@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from graph import build_graph, graph_statistics
-from models import GraphData
+from meeting_intelligence.graph import build_graph, graph_statistics
+from meeting_intelligence.models import GraphData
 
 
 class TestBuildGraph:

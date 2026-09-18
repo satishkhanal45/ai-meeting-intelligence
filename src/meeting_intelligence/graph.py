@@ -11,8 +11,8 @@ from typing import Any
 
 import networkx as nx
 
-from logger import get_logger
-from models import GraphData
+from meeting_intelligence.logger import get_logger
+from meeting_intelligence.models import GraphData
 
 logger = get_logger(__name__)
 

@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Iterable, Optional
 
-from models import Meeting, MeetingListItem
+from meeting_intelligence.models import Meeting, MeetingListItem
 
 _ICS_ESCAPES = {"\\": "\\\\", ";": r"\;", ",": r"\,", "\n": r"\n"}
 

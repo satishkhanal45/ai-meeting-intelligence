@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from database import (
+from meeting_intelligence.database import (
     SEARCHABLE_COLUMNS,
     delete_meeting,
     get_all_participants,
@@ -23,7 +23,7 @@ from database import (
     insert_meeting,
     search_meetings,
 )
-from models import (
+from meeting_intelligence.models import (
     ActionItem,
     Deadline,
     Decision,
@@ -44,7 +44,7 @@ def _temp_db(monkeypatch, tmp_path):
     ``tmp_path`` gives real isolation without touching ``data/meetings.db``.
     """
     db_file = tmp_path / "test_meetings.db"
-    monkeypatch.setattr("database.DB_PATH", str(db_file))
+    monkeypatch.setattr("meeting_intelligence.database.DB_PATH", str(db_file))
     init_db()
     yield db_file
 

@@ -4,8 +4,8 @@ Imports and registers all available LLM providers so a simple
 ``from providers import ...`` makes them discoverable by the pipeline.
 """
 
-from providers.base_provider import BaseProvider
-from providers.errors import (
+from meeting_intelligence.providers.base_provider import BaseProvider
+from meeting_intelligence.providers.errors import (
     ProviderAuthError,
     ProviderBadRequestError,
     ProviderConnectionError,
@@ -15,9 +15,9 @@ from providers.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from providers.gemini_provider import GeminiProvider
-from providers.groq_provider import GroqProvider
-from providers.openrouter_provider import OpenRouterProvider
+from meeting_intelligence.providers.gemini_provider import GeminiProvider
+from meeting_intelligence.providers.groq_provider import GroqProvider
+from meeting_intelligence.providers.openrouter_provider import OpenRouterProvider
 
 __all__ = [
     "BaseProvider",

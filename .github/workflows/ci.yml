@@ -68,3 +68,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t ai-meeting-intelligence:ci .
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name ci-smoke -p 8080:8080 \
+            -e GEMINI_API_KEY=placeholder ai-meeting-intelligence:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/api/health; then exit 0; fi
+            sleep 2
+          done
+          echo "health check never came up"; docker logs ci-smoke; exit 1

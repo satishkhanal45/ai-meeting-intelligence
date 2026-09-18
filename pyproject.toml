@@ -34,6 +34,7 @@ requires = ["setuptools>=70.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.ruff]
+src = ["src", "tests"]
 # Matches the existing house style; a handful of prompt strings and provider
 # signatures sit in the 100-120 range.
 line-length = 120
@@ -49,11 +50,9 @@ ignore = ["N806"]
 "prompts.py" = ["E501"]
 "tests/*" = ["E501"]
 
-# The application is a flat set of top-level modules that the container copies
-# in directly, so installing this project installs its dependencies only.
-# Revisit when the code moves under src/meeting_intelligence/.
-[tool.setuptools]
-py-modules = []
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["meeting_intelligence*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -61,7 +60,7 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 
 [tool.coverage.run]
-source = ["."]
+source = ["src"]
 omit = [
     "tests/*",
     ".venv/*",
@@ -71,3 +70,4 @@ omit = [
 [tool.mypy]
 python_version = "3.11"
 strict = true
+mypy_path = "src"

@@ -14,37 +14,45 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 REQUIRED_MODULES = [
-    "config",
-    "logger",
-    "models",
-    "utils",
-    "database",
-    "prompts",
-    "graph",
-    "pipeline",
-    "providers.base_provider",
-    "providers.gemini_provider",
-    "providers.groq_provider",
-    "providers.openrouter_provider",
+    "meeting_intelligence.config",
+    "meeting_intelligence.logger",
+    "meeting_intelligence.models",
+    "meeting_intelligence.utils",
+    "meeting_intelligence.database",
+    "meeting_intelligence.prompts",
+    "meeting_intelligence.graph",
+    "meeting_intelligence.pipeline",
+    "meeting_intelligence.jobs",
+    "meeting_intelligence.exporters",
+    "meeting_intelligence.api.main",
+    "meeting_intelligence.providers.base_provider",
+    "meeting_intelligence.providers.gemini_provider",
+    "meeting_intelligence.providers.groq_provider",
+    "meeting_intelligence.providers.openrouter_provider",
 ]
 
+PKG = "src/meeting_intelligence"
+
 REQUIRED_FILES = [
-    "config.py",
-    "logger.py",
-    "models.py",
-    "utils.py",
-    "database.py",
-    "prompts.py",
-    "graph.py",
-    "pipeline.py",
+    f"{PKG}/config.py",
+    f"{PKG}/logger.py",
+    f"{PKG}/models.py",
+    f"{PKG}/utils.py",
+    f"{PKG}/database.py",
+    f"{PKG}/prompts.py",
+    f"{PKG}/graph.py",
+    f"{PKG}/pipeline.py",
+    f"{PKG}/jobs.py",
+    f"{PKG}/exporters.py",
+    f"{PKG}/api/main.py",
+    f"{PKG}/providers/__init__.py",
+    f"{PKG}/providers/base_provider.py",
+    f"{PKG}/providers/gemini_provider.py",
+    f"{PKG}/providers/groq_provider.py",
+    f"{PKG}/providers/openrouter_provider.py",
     "pyproject.toml",
     ".env.example",
     "README.md",
-    "providers/__init__.py",
-    "providers/base_provider.py",
-    "providers/gemini_provider.py",
-    "providers/groq_provider.py",
-    "providers/openrouter_provider.py",
     "meetings/sample_transcript.txt",
     "tests/__init__.py",
     "tests/conftest.py",
@@ -53,6 +61,10 @@ REQUIRED_FILES = [
     "tests/test_database.py",
     "tests/test_graph.py",
     "tests/test_pipeline.py",
+    "tests/test_api.py",
+    "tests/test_providers.py",
+    "tests/test_exporters.py",
+    "tests/test_people.py",
 ]
 
 
@@ -67,7 +79,7 @@ def check_files() -> list[str]:
 
 def check_imports() -> list[str]:
     errors = []
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "src"))
     for mod_name in REQUIRED_MODULES:
         try:
             importlib.import_module(mod_name)
@@ -79,7 +91,7 @@ def check_imports() -> list[str]:
 def check_database() -> list[str]:
     errors = []
     try:
-        from database import get_meeting_count, init_db
+        from meeting_intelligence.database import get_meeting_count, init_db
 
         init_db()
         count = get_meeting_count()
@@ -96,7 +108,7 @@ def check_env() -> list[str]:
         errors.append("MISSING: .env (copy from .env.example)")
     else:
         try:
-            from config import settings
+            from meeting_intelligence.config import settings
 
             configured = settings.get_configured_providers()
             print(f"  Configured providers: {configured}")
@@ -152,10 +164,10 @@ def main() -> int:
 
     print("[5/5] Checking provider registration...")
     try:
-        from pipeline import PROVIDER_REGISTRY, register_provider
-        from providers.gemini_provider import GeminiProvider
-        from providers.groq_provider import GroqProvider
-        from providers.openrouter_provider import OpenRouterProvider
+        from meeting_intelligence.pipeline import PROVIDER_REGISTRY, register_provider
+        from meeting_intelligence.providers.gemini_provider import GeminiProvider
+        from meeting_intelligence.providers.groq_provider import GroqProvider
+        from meeting_intelligence.providers.openrouter_provider import OpenRouterProvider
 
         register_provider("gemini", GeminiProvider)
         register_provider("groq", GroqProvider)
@@ -178,7 +190,7 @@ def main() -> int:
         return 1
     else:
         print("  ✓ VALIDATION PASSED — All checks OK")
-        print("\n  Run:  uv run uvicorn api.main:app --reload --port 8080")
+        print("\n  Run:  uv run uvicorn meeting_intelligence.api.main:app --reload --port 8080")
         return 0
 
 

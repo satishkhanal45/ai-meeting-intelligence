@@ -9,7 +9,7 @@ import logging
 import sys
 from typing import Any
 
-from config import DATA_DIR
+from meeting_intelligence.config import DATA_DIR
 
 _LOG_DIR = DATA_DIR / "logs"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)

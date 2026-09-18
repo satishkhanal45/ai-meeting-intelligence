@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from models import (
+from meeting_intelligence.models import (
     ActionItem,
     Deadline,
     Decision,

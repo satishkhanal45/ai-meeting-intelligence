@@ -4,6 +4,7 @@ Loads environment variables, validates API keys, and provides typed
 configuration objects used throughout the application.
 """
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -15,12 +16,30 @@ _QUOTE_CHARS = "\"'"
 
 load_dotenv()
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_DIR = PROJECT_ROOT / "data"
-MEETINGS_DIR = PROJECT_ROOT / "meetings"
+def _dir_from_env(variable: str, default_name: str) -> Path:
+    """Resolve a writable directory from the environment, relative to the CWD.
+
+    These paths must not be derived from the package's own location. Once the
+    package is pip-installed the source tree is gone and __file__ points into
+    site-packages, so walking up from it yields a path like
+    /usr/local/lib/python3.12/data -- nonsensical, and unwritable for a
+    non-root user. Working directory plus an override is what an installed
+    application can rely on.
+    """
+    raw = os.environ.get(variable, "").strip()
+    return Path(raw).expanduser().resolve() if raw else Path.cwd() / default_name
+
+
+#: Where the SQLite database and logs live. Override with DATA_DIR.
+DATA_DIR = _dir_from_env("DATA_DIR", "data")
+
+#: Where sample transcripts live. Override with MEETINGS_DIR.
+MEETINGS_DIR = _dir_from_env("MEETINGS_DIR", "meetings")
+
+#: The built single-page app, when one has been bundled alongside the API.
+STATIC_DIR = _dir_from_env("STATIC_DIR", "static")
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = str(DATA_DIR / "meetings.db")
 
@@ -124,8 +143,8 @@ __all__ = [
     "settings",
     "Settings",
     "ProviderName",
-    "PROJECT_ROOT",
     "DATA_DIR",
     "MEETINGS_DIR",
+    "STATIC_DIR",
     "DB_PATH",
 ]

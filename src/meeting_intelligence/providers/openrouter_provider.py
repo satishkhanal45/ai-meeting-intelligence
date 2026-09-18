@@ -11,8 +11,8 @@ from typing import Any, Optional
 
 import httpx
 
-from config import settings
-from models import ProviderResponse
+from meeting_intelligence.config import settings
+from meeting_intelligence.models import ProviderResponse
 
 from .base_provider import BaseProvider
 from .errors import (

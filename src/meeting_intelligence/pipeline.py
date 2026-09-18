@@ -20,9 +20,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable, Optional, Sequence
 
-from config import settings
-from logger import get_logger
-from models import (
+from meeting_intelligence.config import settings
+from meeting_intelligence.logger import get_logger
+from meeting_intelligence.models import (
     ActionItem,
     ChunkResult,
     Deadline,
@@ -35,19 +35,19 @@ from models import (
     Summary,
     Transcript,
 )
-from prompts import (
+from meeting_intelligence.prompts import (
     PROMPT_VERSION,
     extract_structured,
     merge_summaries,
 )
-from prompts import (
+from meeting_intelligence.prompts import (
     chunk_summary as chunk_summary_prompts,
 )
-from prompts import (
+from meeting_intelligence.prompts import (
     knowledge_graph as kg_prompts,
 )
-from providers.errors import ProviderAuthError, ProviderError
-from utils import (
+from meeting_intelligence.providers.errors import ProviderAuthError, ProviderError
+from meeting_intelligence.utils import (
     cache_chunk_summary,
     chunk_transcript,
     clean_transcript,
@@ -486,7 +486,7 @@ async def aprocess_transcript(
     some chunks could not be summarised the meeting is still returned, with
     ``chunk_failures`` set and ``degraded`` true.
     """
-    from database import insert_meeting
+    from meeting_intelligence.database import insert_meeting
 
     pipeline_start = time.perf_counter()
     meeting_id = generate_id()

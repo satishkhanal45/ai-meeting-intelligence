@@ -11,8 +11,8 @@ from collections import OrderedDict
 from collections.abc import Iterable
 from typing import Optional
 
-from config import settings
-from logger import get_logger
+from meeting_intelligence.config import settings
+from meeting_intelligence.logger import get_logger
 
 logger = get_logger(__name__)
 

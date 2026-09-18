@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from config import settings
-from models import ProviderResponse
+from meeting_intelligence.config import settings
+from meeting_intelligence.models import ProviderResponse
 
 from .retry import acall_with_retry, call_with_retry
 

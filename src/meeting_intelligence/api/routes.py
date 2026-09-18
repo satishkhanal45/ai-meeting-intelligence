@@ -10,7 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
-from api.schemas import (
+from meeting_intelligence.api.schemas import (
     ActionItemPayload,
     ConfigResponse,
     CreatedItemResponse,
@@ -25,8 +25,8 @@ from api.schemas import (
     ProvidersResponse,
     StatsResponse,
 )
-from config import settings
-from database import (
+from meeting_intelligence.config import settings
+from meeting_intelligence.database import (
     create_child,
     delete_child,
     delete_meeting,
@@ -44,32 +44,32 @@ from database import (
     update_child,
     update_meeting_fields,
 )
-from exporters import (
+from meeting_intelligence.exporters import (
     action_items_to_csv,
     deadlines_to_ics,
     export_filename,
     meetings_to_csv,
     to_markdown,
 )
-from jobs import JobStatus, registry
-from logger import get_logger
-from models import DatedDeadline, OwnedActionItem, PersonDetail, PersonSummary
-from pipeline import (
+from meeting_intelligence.jobs import JobStatus, registry
+from meeting_intelligence.logger import get_logger
+from meeting_intelligence.models import DatedDeadline, OwnedActionItem, PersonDetail, PersonSummary
+from meeting_intelligence.pipeline import (
     PROVIDER_REGISTRY,
     PipelineError,
     aprocess_transcript,
     register_provider,
 )
-from providers.errors import ProviderAuthError, ProviderError
-from providers.gemini_provider import AVAILABLE_MODELS as GEMINI_MODELS
-from providers.gemini_provider import DEFAULT_MODEL as GEMINI_DEFAULT
-from providers.gemini_provider import GeminiProvider
-from providers.groq_provider import AVAILABLE_MODELS as GROQ_MODELS
-from providers.groq_provider import DEFAULT_MODEL as GROQ_DEFAULT
-from providers.groq_provider import GroqProvider
-from providers.openrouter_provider import AVAILABLE_MODELS as OPENROUTER_MODELS
-from providers.openrouter_provider import DEFAULT_MODEL as OPENROUTER_DEFAULT
-from providers.openrouter_provider import OpenRouterProvider
+from meeting_intelligence.providers.errors import ProviderAuthError, ProviderError
+from meeting_intelligence.providers.gemini_provider import AVAILABLE_MODELS as GEMINI_MODELS
+from meeting_intelligence.providers.gemini_provider import DEFAULT_MODEL as GEMINI_DEFAULT
+from meeting_intelligence.providers.gemini_provider import GeminiProvider
+from meeting_intelligence.providers.groq_provider import AVAILABLE_MODELS as GROQ_MODELS
+from meeting_intelligence.providers.groq_provider import DEFAULT_MODEL as GROQ_DEFAULT
+from meeting_intelligence.providers.groq_provider import GroqProvider
+from meeting_intelligence.providers.openrouter_provider import AVAILABLE_MODELS as OPENROUTER_MODELS
+from meeting_intelligence.providers.openrouter_provider import DEFAULT_MODEL as OPENROUTER_DEFAULT
+from meeting_intelligence.providers.openrouter_provider import OpenRouterProvider
 
 logger = get_logger(__name__)
 

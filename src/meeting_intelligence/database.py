@@ -13,9 +13,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from config import DB_PATH
-from logger import get_logger
-from models import (
+from meeting_intelligence.config import DB_PATH
+from meeting_intelligence.logger import get_logger
+from meeting_intelligence.models import (
     ActionItem,
     DatedDeadline,
     Deadline,

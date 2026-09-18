@@ -13,7 +13,7 @@ import random
 import time
 from typing import Awaitable, Callable, TypeVar
 
-from logger import get_logger
+from meeting_intelligence.logger import get_logger
 
 from .errors import ProviderError
 

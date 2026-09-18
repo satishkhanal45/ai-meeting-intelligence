@@ -12,10 +12,10 @@ import json
 import httpx
 import pytest
 
-from config import settings
-from models import ProviderResponse
-from providers.base_provider import BaseProvider
-from providers.errors import (
+from meeting_intelligence.config import settings
+from meeting_intelligence.models import ProviderResponse
+from meeting_intelligence.providers.base_provider import BaseProvider
+from meeting_intelligence.providers.errors import (
     ProviderAuthError,
     ProviderBadRequestError,
     ProviderConnectionError,
@@ -24,8 +24,8 @@ from providers.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from providers.openrouter_provider import OpenRouterProvider
-from providers.retry import acall_with_retry, call_with_retry
+from meeting_intelligence.providers.openrouter_provider import OpenRouterProvider
+from meeting_intelligence.providers.retry import acall_with_retry, call_with_retry
 
 
 @pytest.fixture(autouse=True)
@@ -206,19 +206,19 @@ class TestRetryPolicy:
         assert attempts["n"] == 1
 
     def test_retry_after_is_preferred_over_backoff(self):
-        from providers.retry import _next_delay
+        from meeting_intelligence.providers.retry import _next_delay
 
         exc = ProviderRateLimitError("slow", provider="p", retry_after=5.0)
         assert _next_delay(exc, attempt=0, base_delay=0.1, max_delay=30.0) == 5.0
 
     def test_retry_after_is_capped_by_max_delay(self):
-        from providers.retry import _next_delay
+        from meeting_intelligence.providers.retry import _next_delay
 
         exc = ProviderRateLimitError("slow", provider="p", retry_after=999.0)
         assert _next_delay(exc, attempt=0, base_delay=0.1, max_delay=30.0) == 30.0
 
     def test_backoff_grows_and_stays_within_bounds(self):
-        from providers.retry import _backoff_delay
+        from meeting_intelligence.providers.retry import _backoff_delay
 
         for attempt in range(6):
             delay = _backoff_delay(attempt, base_delay=0.5, max_delay=30.0)

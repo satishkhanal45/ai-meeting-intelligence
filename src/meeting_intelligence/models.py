@@ -18,7 +18,7 @@ from pydantic import (
     field_validator,
 )
 
-from logger import get_logger
+from meeting_intelligence.logger import get_logger
 
 _LOGGER = get_logger(__name__)
 

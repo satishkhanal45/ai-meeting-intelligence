@@ -14,7 +14,7 @@ __pycache__/
 .coverage
 htmlcov/
 
-# Node
+# Node — the frontend build stage installs its own dependencies
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
